@@ -1,0 +1,6 @@
+{
+  "errors" : [ {
+    "status" : 404,
+    "message" : "File not found.; Path: 'libs-releases-local:org/gradle/gradle-wrapper/8.10.2/gradle-wrapper-8.10.2.jar'"
+  } ]
+}
