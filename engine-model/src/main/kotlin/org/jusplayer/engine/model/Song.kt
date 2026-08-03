@@ -1,5 +1,8 @@
 package org.jusplayer.engine.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class Song(
     val id: String,
     val title: String,
@@ -18,6 +21,7 @@ data class Song(
     override fun hashCode(): Int = id.hashCode()
 }
 
+@Serializable
 data class Artist(
     val id: String,
     val name: String,
@@ -32,6 +36,7 @@ data class Artist(
     override fun hashCode(): Int = id.hashCode()
 }
 
+@Serializable
 data class Album(
     val id: String,
     val title: String,
@@ -48,6 +53,7 @@ data class Album(
     override fun hashCode(): Int = id.hashCode()
 }
 
+@Serializable
 data class Playlist(
     val id: String,
     val title: String,
@@ -63,6 +69,7 @@ data class Playlist(
     override fun hashCode(): Int = id.hashCode()
 }
 
+@Serializable
 data class Stream(
     val url: String,
     val format: String,
@@ -72,12 +79,14 @@ data class Stream(
     val duration: Long,
 )
 
+@Serializable
 data class Lyrics(
     val text: String,
     val source: String,
     val synced: Boolean,
 )
 
+@Serializable
 data class SearchResult(
     val songs: List<Song>,
     val artists: List<Artist>,

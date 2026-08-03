@@ -21,5 +21,6 @@ include(
     "engine-core",
     "engine-provider-newpipe",
     "engine-utils",
+    "engine-http",
     "sample-console",
 )
