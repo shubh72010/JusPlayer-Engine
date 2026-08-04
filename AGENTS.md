@@ -31,6 +31,13 @@ authoritative and detailed — read it before changing behavior.
 - Tests use `kotlin.test` via `testImplementation(kotlin("test"))`; no other test framework.
 - No CI, no lint/format plugins, no codegen — `./gradlew build` is the full gate.
 
+## Documentation
+
+The `docs/` directory holds the user-facing documentation (13 files, see
+`README.md` for the full list and links). The README is a concise sales page
+with links to each doc; each doc covers one topic in depth. Keep docs
+accurate when changing APIs — the docs are the first thing a new user reads.
+
 ## Module layout
 
 Dependency flow is bottom-up: `engine-utils` → `engine-model`; `engine-events`,
