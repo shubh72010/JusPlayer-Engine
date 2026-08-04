@@ -5,13 +5,14 @@ plugins {
     kotlin("jvm") version "2.0.21" apply false
 }
 
+// Group is the JitPack-derived coordinate (`com.github.<owner>.<repo>`) rather
+// than an org namespace: JitPack serves the root module as
+// `com.github.shubh72010:JusPlayer-Engine`, and only harvests submodules from
+// ~/.m2 when they carry this same group. Consumers depend on
+// `com.github.shubh72010.JusPlayer-Engine:<module>:<version>`.
 allprojects {
-    group = "org.jusplayer"
+    group = "com.github.shubh72010.JusPlayer-Engine"
 }
-
-// Publish every module as a Maven artifact so consumers can depend on
-// `org.jusplayer:<module>:<version>` (e.g. via JitPack). The version lives in
-// gradle.properties — bump it there and tag the release.
 subprojects {
     apply(plugin = "maven-publish")
 

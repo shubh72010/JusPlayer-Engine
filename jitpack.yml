@@ -10,8 +10,12 @@ jdk:
   - openjdk21
 
 before_install:
+  # Clone + install the extractor in a subshell so the `cd` does not leak into
+  # the `install` step (JitPack runs every command in the same shell — the old
+  # `cd` made `install` run `publishToMavenLocal` inside NewPipeExtractor,
+  # so our project was never built and only an empty root jar was published).
   - git clone --depth 1 --branch v0.26.4 https://github.com/TeamNewPipe/NewPipeExtractor.git
-  - cd NewPipeExtractor && ./gradlew publishToMavenLocal --no-daemon
+  - (cd NewPipeExtractor && ./gradlew publishToMavenLocal --no-daemon)
 
 install:
-  - ./gradlew publishToMavenLocal --no-daemon
+  - cd /home/jitpack/build && ./gradlew publishToMavenLocal --no-daemon

@@ -126,8 +126,9 @@ cd JusPlayer-Engine
 
 ### As a dependency (library use)
 
-Every module publishes as a Maven artifact `org.jusplayer:<module>:<version>` via
-**JitPack** — no account or setup needed, you just reference the GitHub repo + tag:
+Every module publishes as a Maven artifact via **JitPack** — no account or setup
+needed, you just reference the GitHub repo + tag. Multi-module coordinates use the
+repo's group (`com.github.<owner>.<repo>`) with the module name as the artifact id:
 
 ```kotlin
 // settings.gradle.kts
@@ -139,11 +140,11 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.github.shubh72010:JusPlayer-Engine:engine-api:1.0.0")
-    implementation("com.github.shubh72010:JusPlayer-Engine:engine-provider-newpipe:1.0.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.1.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.1.0")
     // lyrics / artwork / resolver are optional:
-    implementation("com.github.shubh72010:JusPlayer-Engine:engine-provider-lrclib:1.0.0")
-    implementation("com.github.shubh72010:JusPlayer-Engine:engine-provider-coverartarchive:1.0.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.1.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.1.0")
 }
 ```
 
@@ -284,8 +285,8 @@ org.gradle.jvmargs=-Xmx2g
 ```
 
 Modules declare dependencies independently; the root [`build.gradle.kts`](build.gradle.kts)
-sets the shared `group = org.jusplayer` / `version = 1.0.0` and the Kotlin JVM
-plugin version.
+sets the shared `group = com.github.shubh72010.JusPlayer-Engine` (JitPack-friendly)
+and `version = 1.1.0` and the Kotlin JVM plugin version.
 
 ---
 
@@ -324,7 +325,8 @@ one, so provide your own (e.g. a Media3/ExoPlayer adapter).
 - **Lyrics unsupported by the NewPipe provider** (`MusicProvider` no longer owns
   lyrics; use the LRCLIB `LyricsProvider` instead).
 - **JitPack-ready, not yet on Maven Central.** Modules publish as Maven artifacts
-  (`org.jusplayer:<module>:<version>`) and are consumable via JitPack from git tags;
+  (`com.github.shubh72010.JusPlayer-Engine:<module>:<version>`) and are consumable
+  via JitPack from git tags;
   Central is future work. See [Installation → As a dependency](#as-a-dependency-library-use).
 
 ## Roadmap / Ideas

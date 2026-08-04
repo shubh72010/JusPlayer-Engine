@@ -1,6 +1,7 @@
 # AGENTS.md
 
-Multi-module Kotlin/JVM Gradle project (`org.jusplayer` group). Coroutine-first music
+Multi-module Kotlin/JVM Gradle project (`com.github.shubh72010.JusPlayer-Engine`
+group — the JitPack-derived coordinate). Coroutine-first music
 playback engine with pluggable providers; **no Android dependencies**. The README is
 authoritative and detailed — read it before changing behavior.
 
@@ -19,10 +20,14 @@ authoritative and detailed — read it before changing behavior.
   ```
 - **Versioning/publishing:** the version lives in **one place** — `version=` in
   `gradle.properties`. To release: bump it there, then `git tag v<version>` and push.
-  `./gradlew publishToMavenLocal` publishes every module as `org.jusplayer:<module>:<version>`.
+  `./gradlew publishToMavenLocal` publishes every module as
+  `com.github.shubh72010.JusPlayer-Engine:<module>:<version>` — the group MUST be
+  the `com.github.<owner>.<repo>` form or JitPack won't harvest submodules (it only
+  renames the root).
   `jitpack.yml` makes JitPack builds work: it pre-builds NewPipeExtractor into
   `mavenLocal` (JitPack's clean environment has none) and pins JDK 21, then runs
-  `publishToMavenLocal`.
+  `publishToMavenLocal`. The extractor pre-build runs in a subshell so its `cd`
+  doesn't leak into the `install` step.
 - Tests use `kotlin.test` via `testImplementation(kotlin("test"))`; no other test framework.
 - No CI, no lint/format plugins, no codegen — `./gradlew build` is the full gate.
 
