@@ -17,6 +17,9 @@ import org.jusplayer.engine.model.Song as JpSong
 import org.jusplayer.engine.model.Stream as JpStream
 import org.jusplayer.engine.playback.PlayerAdapter
 import org.jusplayer.engine.provider.MusicProvider
+import org.jusplayer.engine.provider.coverartarchive.CoverArtArchiveProvider
+import org.jusplayer.engine.provider.coverartarchive.MusicBrainzResolver
+import org.jusplayer.engine.provider.lrclib.LRCLIBProvider
 import org.jusplayer.engine.provider.newpipe.NewPipeProvider
 import java.time.Duration
 
@@ -33,6 +36,9 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
     private val player = runBlocking {
         createJusPlayer {
             provider(this@JusPlayerHttpEngine.provider)
+            lyricsProvider(LRCLIBProvider())
+            artworkProvider(CoverArtArchiveProvider())
+            releaseResolver(MusicBrainzResolver())
             player(NoopPlayerAdapter())
         }
     }
@@ -75,11 +81,27 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 get("/v1/lyrics/{id}") {
                     val id = call.parameters["id"] ?: ""
                     runCatching {
-                        val lyrics = runBlocking { provider.getLyrics(id) }
+                        val song = runBlocking { provider.getSong(id) }
+                        val lyrics = runBlocking { player.engine.lyrics(song) }
                         if (lyrics != null) {
                             call.respond(lyrics)
                         } else {
                             call.respond(mapOf("error" to "lyrics unavailable"))
+                        }
+                    }.getOrElse {
+                        call.respond(mapOf("error" to (it.message ?: "unknown")))
+                    }
+                }
+
+                get("/v1/artwork/{id}") {
+                    val id = call.parameters["id"] ?: ""
+                    runCatching {
+                        val song = runBlocking { provider.getSong(id) }
+                        val artwork = runBlocking { player.engine.artwork(song) }
+                        if (artwork != null) {
+                            call.respond(artwork)
+                        } else {
+                            call.respond(mapOf("error" to "artwork unavailable"))
                         }
                     }.getOrElse {
                         call.respond(mapOf("error" to (it.message ?: "unknown")))

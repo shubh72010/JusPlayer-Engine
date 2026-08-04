@@ -1,0 +1,17 @@
+# JitPack build configuration (https://jitpack.io/docs/BUILDING/).
+#
+# Two gotchas this file handles:
+#   1. The build needs JDK 11-21; JitPack's default may be newer (Gradle 8.10 /
+#      Kotlin 2.0.21 fail on JDK 25 with a cryptic "25.0.4" daemon error).
+#   2. `engine-provider-newpipe` resolves `net.newpipe:extractor:v0.26.4` from
+#      `mavenLocal()`, but JitPack builds in a clean environment without it. So we
+#      clone + install the exact extractor tag locally before building the project.
+jdk:
+  - openjdk21
+
+before_install:
+  - git clone --depth 1 --branch v0.26.4 https://github.com/TeamNewPipe/NewPipeExtractor.git
+  - cd NewPipeExtractor && ./gradlew publishToMavenLocal --no-daemon
+
+install:
+  - ./gradlew publishToMavenLocal --no-daemon

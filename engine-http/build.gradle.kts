@@ -15,6 +15,8 @@ dependencies {
     implementation(project(":engine-provider-api"))
     implementation(project(":engine-playback-api"))
     implementation(project(":engine-provider-newpipe"))
+    implementation(project(":engine-provider-lrclib"))
+    implementation(project(":engine-provider-coverartarchive"))
     implementation("io.ktor:ktor-server-netty:2.3.11")
     implementation("io.ktor:ktor-server-cors:2.3.11")
     implementation("io.ktor:ktor-server-content-negotiation:2.3.11")

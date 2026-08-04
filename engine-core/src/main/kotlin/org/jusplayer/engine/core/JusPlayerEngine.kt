@@ -12,12 +12,16 @@ import org.jusplayer.engine.events.EventBus
 import org.jusplayer.engine.events.PlaybackPaused
 import org.jusplayer.engine.events.SongEnded
 import org.jusplayer.engine.events.SongStarted
+import org.jusplayer.engine.model.Artwork
+import org.jusplayer.engine.model.Lyrics
 import org.jusplayer.engine.model.PlaybackState
 import org.jusplayer.engine.model.Song
 import org.jusplayer.engine.model.Stream
 import org.jusplayer.engine.playback.PlayerAdapter
 import org.jusplayer.engine.provider.MusicProvider
 import org.jusplayer.engine.queue.QueueEngine
+import org.jusplayer.engine.core.service.ArtworkService
+import org.jusplayer.engine.core.service.LyricsService
 import org.jusplayer.engine.core.service.PlaybackService
 import org.jusplayer.engine.core.service.QueueService
 import org.jusplayer.engine.core.service.SearchService
@@ -33,6 +37,8 @@ class JusPlayerEngine(
     private val searchService = SearchService(config.provider!!)
     private val playbackService = PlaybackService(playerAdapter, eventBus)
     private val queueService = QueueService(eventBus)
+    private val lyricsService = LyricsService(config.lyricsProvider)
+    private val artworkService = ArtworkService(config.releaseResolver, config.artworkProvider)
 
     private val _state = MutableStateFlow(PlaybackState.Idle)
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
@@ -64,6 +70,21 @@ class JusPlayerEngine(
     suspend fun search(query: String): List<Song> {
         val result = searchService.search(query)
         return result.songs
+    }
+
+    /**
+     * Returns lyrics for [song] when a [LyricsProvider] is registered, otherwise `null`.
+     */
+    suspend fun lyrics(song: Song): Lyrics? {
+        return lyricsService.lyrics(song)
+    }
+
+    /**
+     * Resolves [song] to a release and fetches cover art when both a
+     * [ReleaseResolver] and an [ArtworkProvider] are registered, otherwise `null`.
+     */
+    suspend fun artwork(song: Song): Artwork? {
+        return artworkService.artwork(song)
     }
 
     suspend fun play(song: Song) {
@@ -109,4 +130,7 @@ class JusPlayerEngine(
 
 data class JusPlayerConfig(
     val provider: MusicProvider? = null,
+    val lyricsProvider: org.jusplayer.engine.provider.LyricsProvider? = null,
+    val artworkProvider: org.jusplayer.engine.provider.ArtworkProvider? = null,
+    val releaseResolver: org.jusplayer.engine.provider.ReleaseResolver? = null,
 )

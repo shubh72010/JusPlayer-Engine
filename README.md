@@ -52,8 +52,11 @@ import kotlinx.coroutines.runBlocking
 
 fun main() = runBlocking {
     val jusPlayer = createJusPlayer {
-        provider(NewPipeProvider())      // plug in a backend
-        player(ConsolePlayerAdapter())   // plug in an output (speaker/console)
+        provider(NewPipeProvider())                // plug in a backend
+        lyricsProvider(LRCLIBProvider())           // optional: lyrics
+        artworkProvider(CoverArtArchiveProvider()) // optional: cover art
+        releaseResolver(MusicBrainzResolver())     // optional: song -> release
+        player(ConsolePlayerAdapter())             // plug in an output (speaker/console)
     }
 
     val songs = jusPlayer.engine.search("Daft Punk")
@@ -62,6 +65,10 @@ fun main() = runBlocking {
         jusPlayer.queue.add(it)
         jusPlayer.queue.next()
         println("Now playing: ${jusPlayer.currentSong?.title}")
+        jusPlayer.currentSong?.let { song ->
+            println("Lyrics: ${jusPlayer.engine.lyrics(song)?.text?.take(40)}")
+            println("Artwork: ${jusPlayer.engine.artwork(song)?.frontUrl}")
+        }
     }
 }
 ```
@@ -119,8 +126,33 @@ cd JusPlayer-Engine
 
 ### As a dependency (library use)
 
-Publish modules to your own repository (not yet on Maven Central) and depend on
-`org.jusplayer:engine-api`, `engine-core`, `engine-provider-newpipe`, etc.
+Every module publishes as a Maven artifact `org.jusplayer:<module>:<version>` via
+**JitPack** — no account or setup needed, you just reference the GitHub repo + tag:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        maven(url = "https://jitpack.io")
+    }
+}
+
+// build.gradle.kts
+dependencies {
+    implementation("com.github.shubh72010:JusPlayer-Engine:engine-api:1.0.0")
+    implementation("com.github.shubh72010:JusPlayer-Engine:engine-provider-newpipe:1.0.0")
+    // lyrics / artwork / resolver are optional:
+    implementation("com.github.shubh72010:JusPlayer-Engine:engine-provider-lrclib:1.0.0")
+    implementation("com.github.shubh72010:JusPlayer-Engine:engine-provider-coverartarchive:1.0.0")
+}
+```
+
+**Versioning / updating:** the version lives in **one place** — `version=` in
+`gradle.properties`. Releases are **git tags** (`v1.0.0`, `v1.1.0`, …); a new tag is a
+new JitPack release, and consumers update by changing the tag in their dependency
+string. `jitpack.yml` pre-builds NewPipeExtractor (JitPack builds in a clean
+environment) and pins JDK 21, then publishes via `publishToMavenLocal`.
+
 Each module is a separate Gradle project — see [`settings.gradle.kts`](settings.gradle.kts).
 
 ---
@@ -150,7 +182,8 @@ Endpoints:
 | GET    | `/health`       | Liveness check → `{"status":"ok"}` |
 | GET    | `/v1/search?q=` | Search songs via the provider |
 | GET    | `/v1/stream/{id}` | Stream URL for a song ID  |
-| GET    | `/v1/lyrics/{id}` | Lyrics when the provider supports them |
+| GET    | `/v1/lyrics/{id}` | Lyrics when a provider supports them |
+| GET    | `/v1/artwork/{id}` | Cover art URL(s) for a song |
 
 ---
 
@@ -167,6 +200,8 @@ Endpoints:
 | `engine-core` | Wiring layer: `JusPlayerEngine`, `ProviderRegistry`, services (`Search`, `Queue`, `Playback`) |
 | `engine-api` | Fast DSL facade that ties everything together |
 | `engine-provider-newpipe` | NewPipeExtractor (YouTube) provider + JVM downloader + mappers + cache |
+| `engine-provider-lrclib` | `LyricsProvider` backed by the LRCLIB API |
+| `engine-provider-coverartarchive` | `ArtworkProvider` (Cover Art Archive) + `MusicBrainzResolver` |
 | `engine-http` | Optional Ktor server exposing the engine over REST |
 | `engine-utils` | `IdGenerator`, validation helpers |
 
@@ -178,28 +213,51 @@ engine-utils  →  engine-model
 engine-events ───────────────────────▶ engine-core
 engine-playback-api ─────────────┘
 engine-provider-api ─────────────→ engine-provider-newpipe
+engine-provider-api ─────────────→ engine-provider-lrclib
+engine-provider-api ─────────────→ engine-provider-coverartarchive
 engine-queue ──────────────────────┘
 engine-api (facade) ◀── uses everything above
-engine-http / sample-console ─▶ engine-api + engine-provider-newpipe
+engine-http / sample-console ─▶ engine-api + every provider
 ```
 
 ### Building a provider (contract)
 
+Providers are split by concern. A *music* provider (search/get/stream):
+
 ```kotlin
 class MyProvider : MusicProvider {
     override val name = "MyProvider"
-    override val capabilities = ProviderCapabilities(search = true, lyrics = true)
+    override val capabilities = ProviderCapabilities(search = true, getSong = true, getStream = true)
 
     override suspend fun search(query: String): SearchResult = /* ... */
     override suspend fun getSong(id: String): Song = /* ... */
     override suspend fun getStream(songId: String): Stream = /* ... */
-    override suspend fun getLyrics(songId: String): Lyrics? = null
 }
 ```
 
-Throw `ProviderException.NotFound`, `.Network`, `.RateLimited`,
-`.ExtractionFailed`, or `.Unsupported` instead of letting raw extractor
-exceptions escape.
+Lyrics and artwork are separate providers so a given backend can swap them freely:
+
+```kotlin
+class MyLyricsProvider : LyricsProvider {
+    override val name = "MyLyrics"
+    override suspend fun getLyrics(song: Song): Lyrics? = /* ... */   // null = none
+}
+
+class MyArtworkProvider : ArtworkProvider {
+    override val name = "MyArtwork"
+    override suspend fun getArtwork(releaseMbid: String): Artwork? = /* ... */
+}
+```
+
+Cover art is keyed by MusicBrainz release MBID, so a `ReleaseResolver` bridges a
+streaming `Song` to a release before the artwork provider is consulted. The engine
+composes them: `engine.lyrics(song)` and `engine.artwork(song)` return `null` when the
+relevant provider isn't registered, so all of these are optional at build time.
+
+Throw `ProviderException.NotFound`, `.Network`, `.RateLimited`, `.ExtractionFailed`,
+or `.Unsupported` instead of letting raw exceptions escape. LRCLIB's `429` and Cover
+Art Archive's `503` map to `RateLimited`; both services recommend honoring
+`Retry-After` and throttling requests.
 
 ---
 
@@ -263,14 +321,17 @@ one, so provide your own (e.g. a Media3/ExoPlayer adapter).
   adapters aren't included yet).
 - **Playback state is manual.** The engine tracks events you emit; it does not
   yet self-drive gapless transitions or auto-advance.
-- **Lyrics unsupported by the NewPipe provider** (`getLyrics` returns `null`).
-- **Not yet published** to Maven Central / JitPack for drop-in usage.
+- **Lyrics unsupported by the NewPipe provider** (`MusicProvider` no longer owns
+  lyrics; use the LRCLIB `LyricsProvider` instead).
+- **JitPack-ready, not yet on Maven Central.** Modules publish as Maven artifacts
+  (`org.jusplayer:<module>:<version>`) and are consumable via JitPack from git tags;
+  Central is future work. See [Installation → As a dependency](#as-a-dependency-library-use).
 
 ## Roadmap / Ideas
 
 - Media3 (ExoPlayer) `PlayerAdapter`
 - Gapless / auto-advance playback in `QueueEngine`
-- JitPack/Maven Central release workflow
+- Publish to Maven Central (beyond JitPack)
 - Additional providers (SoundCloud, Bandcamp, ...)
 
 ---

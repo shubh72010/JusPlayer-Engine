@@ -46,10 +46,10 @@ class NewPipeProviderTest {
     }
 
     @Test
-    fun capabilitiesDeclareNoLyrics() {
+    fun capabilitiesDeclareSearchAndStreaming() {
         val provider = NewPipeProvider(cache = ProviderCache(), downloader = NetworkDownDownloader())
         assertTrue(provider.capabilities.search)
         assertTrue(provider.capabilities.getStream)
-        assertTrue(!provider.capabilities.lyrics)
+        assertTrue(provider.capabilities.getSong)
     }
 }

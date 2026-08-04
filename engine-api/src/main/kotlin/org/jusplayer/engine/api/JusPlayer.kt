@@ -6,17 +6,36 @@ import org.jusplayer.engine.events.EventBus
 import org.jusplayer.engine.model.PlaybackState
 import org.jusplayer.engine.model.Song
 import org.jusplayer.engine.playback.PlayerAdapter
+import org.jusplayer.engine.provider.ArtworkProvider
+import org.jusplayer.engine.provider.LyricsProvider
+import org.jusplayer.engine.provider.MusicProvider
+import org.jusplayer.engine.provider.ReleaseResolver
 import org.jusplayer.engine.queue.QueueEngine
 
 @JusPlayerDsl
 class JusPlayerBuilder internal constructor() {
-    var provider: org.jusplayer.engine.provider.MusicProvider? = null
+    var provider: MusicProvider? = null
     var playerAdapter: PlayerAdapter? = null
     var eventBus: EventBus? = null
     var queueEngine: QueueEngine? = null
+    var lyricsProvider: LyricsProvider? = null
+    var artworkProvider: ArtworkProvider? = null
+    var releaseResolver: ReleaseResolver? = null
 
-    fun provider(provider: org.jusplayer.engine.provider.MusicProvider) {
+    fun provider(provider: MusicProvider) {
         this.provider = provider
+    }
+
+    fun lyricsProvider(provider: LyricsProvider) {
+        this.lyricsProvider = provider
+    }
+
+    fun artworkProvider(provider: ArtworkProvider) {
+        this.artworkProvider = provider
+    }
+
+    fun releaseResolver(resolver: ReleaseResolver) {
+        this.releaseResolver = resolver
     }
 
     fun player(adapter: PlayerAdapter) {
@@ -36,7 +55,12 @@ class JusPlayerBuilder internal constructor() {
         val resolvedQueue = queueEngine ?: QueueEngine()
         val resolvedPlayer = playerAdapter
             ?: throw IllegalStateException("A PlayerAdapter is required")
-        val config = JusPlayerConfig(provider = provider)
+        val config = JusPlayerConfig(
+            provider = provider,
+            lyricsProvider = lyricsProvider,
+            artworkProvider = artworkProvider,
+            releaseResolver = releaseResolver,
+        )
         val engine = JusPlayerEngine(config, resolvedEventBus, resolvedQueue, resolvedPlayer)
         return JusPlayer(engine, resolvedQueue, resolvedEventBus)
     }

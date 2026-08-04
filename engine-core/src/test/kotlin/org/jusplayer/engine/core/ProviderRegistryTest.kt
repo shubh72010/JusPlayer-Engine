@@ -25,10 +25,6 @@ class FakeProvider : MusicProvider {
     override suspend fun getStream(songId: String): org.jusplayer.engine.model.Stream {
         return org.jusplayer.engine.model.Stream("", "mp3", 0, 0, false, 0)
     }
-
-    override suspend fun getLyrics(songId: String): org.jusplayer.engine.model.Lyrics? {
-        return null
-    }
 }
 
 class ProviderRegistryTest {

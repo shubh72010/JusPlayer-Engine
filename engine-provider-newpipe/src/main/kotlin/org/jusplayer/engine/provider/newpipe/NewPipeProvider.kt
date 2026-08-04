@@ -3,7 +3,6 @@ package org.jusplayer.engine.provider.newpipe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import org.jusplayer.engine.model.Lyrics
 import org.jusplayer.engine.model.SearchResult
 import org.jusplayer.engine.model.Song
 import org.jusplayer.engine.model.Stream
@@ -51,7 +50,6 @@ class NewPipeProvider : MusicProvider {
         search = true,
         getSong = true,
         getStream = true,
-        lyrics = false,
     )
 
     override suspend fun search(query: String): SearchResult = withContext(Dispatchers.IO) {
@@ -96,10 +94,6 @@ class NewPipeProvider : MusicProvider {
             streamType = info.streamType,
             duration = info.duration,
         )
-    }
-
-    override suspend fun getLyrics(songId: String): Lyrics? {
-        return null
     }
 
     /**

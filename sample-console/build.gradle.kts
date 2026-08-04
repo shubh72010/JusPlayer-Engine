@@ -10,6 +10,8 @@ application {
 dependencies {
     implementation(project(":engine-core"))
     implementation(project(":engine-provider-newpipe"))
+    implementation(project(":engine-provider-lrclib"))
+    implementation(project(":engine-provider-coverartarchive"))
     implementation(project(":engine-model"))
     implementation(project(":engine-events"))
     implementation(project(":engine-provider-api"))

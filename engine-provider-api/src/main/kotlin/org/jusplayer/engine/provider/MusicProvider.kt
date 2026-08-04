@@ -1,6 +1,5 @@
 package org.jusplayer.engine.provider
 
-import org.jusplayer.engine.model.Lyrics
 import org.jusplayer.engine.model.SearchResult
 import org.jusplayer.engine.model.Song
 import org.jusplayer.engine.model.Stream
@@ -19,6 +18,4 @@ interface MusicProvider {
     suspend fun getSong(id: String): Song
 
     suspend fun getStream(songId: String): Stream
-
-    suspend fun getLyrics(songId: String): Lyrics?
 }

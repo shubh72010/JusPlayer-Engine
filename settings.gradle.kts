@@ -20,6 +20,8 @@ include(
     "engine-api",
     "engine-core",
     "engine-provider-newpipe",
+    "engine-provider-lrclib",
+    "engine-provider-coverartarchive",
     "engine-utils",
     "engine-http",
     "sample-console",
