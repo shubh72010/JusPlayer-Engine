@@ -116,7 +116,6 @@ class MusicBrainzResolverTest {
             album = null,
             duration = 233_000,
             thumbnailUrl = null,
-            streamUrl = null,
         )
     }
 

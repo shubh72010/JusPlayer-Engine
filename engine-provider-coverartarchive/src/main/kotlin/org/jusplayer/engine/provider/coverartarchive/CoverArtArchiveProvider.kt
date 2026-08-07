@@ -59,6 +59,9 @@ class CoverArtArchiveProvider(
             backUrl = back?.image,
             thumbnails = selected.thumbnails,
             sourceMbid = releaseMbid,
+            source = name,
+            width = selected.width,
+            height = selected.height,
         )
     }
 
@@ -90,4 +93,6 @@ internal data class CaaImage(
     val back: Boolean = false,
     val image: String? = null,
     val thumbnails: Map<String, String> = emptyMap(),
+    val width: Int? = null,
+    val height: Int? = null,
 )

@@ -18,7 +18,6 @@ object SongMapper {
             album = null,
             duration = item.duration.coerceAtLeast(0),
             thumbnailUrl = item.thumbnails.firstOrNull()?.url,
-            streamUrl = null,
         )
     }
 
@@ -31,7 +30,7 @@ object SongMapper {
             album = null,
             duration = info.duration.coerceAtLeast(0),
             thumbnailUrl = info.thumbnails.firstOrNull()?.url,
-            streamUrl = null,
+            releaseDate = info.textualUploadDate,
         )
     }
 }

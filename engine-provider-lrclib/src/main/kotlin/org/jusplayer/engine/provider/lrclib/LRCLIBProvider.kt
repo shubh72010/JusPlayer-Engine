@@ -18,8 +18,8 @@ import java.net.URLEncoder
  * A [LyricsProvider] backed by the LRCLIB API (https://lrclib.net).
  *
  * Lyrics are matched from the metadata on a [Song]: track name, artist name,
- * album name (recommended) and duration in seconds (Song duration is millis and
- * is converted here).
+ * album name (recommended) and duration in seconds. A client User-Agent is set by
+ * the default [JdkHttpTransport], as LRCLIB requires.
  *
  * Per the LRCLIB requirements, requests are throttled sequentially with a short
  * delay, and 429 responses are surfaced as [ProviderException.RateLimited]
@@ -52,7 +52,7 @@ class LRCLIBProvider(
             song.album?.title?.takeIf { it.isNotBlank() }?.let {
                 append("&album_name=").append(URLEncoder.encode(it, "UTF-8"))
             }
-            append("&duration=").append((song.duration / 1000).coerceIn(1, 3600))
+            append("&duration=").append(song.duration.coerceIn(1, 3600))
         }
 
         delay(throttleMillis)
@@ -117,7 +117,7 @@ internal data class LrcLibResponse(
     val trackName: String? = null,
     val artistName: String? = null,
     val albumName: String? = null,
-    val duration: Long? = null,
+    val duration: Double? = null,
     val instrumental: Boolean = false,
     val plainLyrics: String? = null,
     val syncedLyrics: String? = null,

@@ -136,7 +136,6 @@ class QueueEngineTest {
             album = null,
             duration = 180_000,
             thumbnailUrl = null,
-            streamUrl = null,
         )
     }
 }

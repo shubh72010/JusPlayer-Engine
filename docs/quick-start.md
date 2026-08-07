@@ -15,10 +15,10 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.1.0")
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.1.0")
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.1.0")
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.1.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.3.0")
 }
 ```
 

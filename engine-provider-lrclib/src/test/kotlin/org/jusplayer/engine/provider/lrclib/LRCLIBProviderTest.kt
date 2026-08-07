@@ -27,15 +27,14 @@ class LRCLIBProviderTest {
         }
     }
 
-    private fun song(title: String = "I Want to Live", durationMillis: Long = 233_000): Song {
+    private fun song(title: String = "I Want to Live", duration: Long = 233): Song {
         return Song(
             id = "id-1",
             title = title,
             artists = listOf(Artist(id = "a", name = "Borislav Slavov", thumbnailUrl = null)),
             album = null,
-            duration = durationMillis,
+            duration = duration,
             thumbnailUrl = null,
-            streamUrl = null,
         )
     }
 
@@ -62,15 +61,36 @@ class LRCLIBProviderTest {
     }
 
     @Test
-    fun convertsDurationMillisToSecondsInUrl() = runBlocking {
+    fun sendsDurationSecondsInUrl() = runBlocking {
         val transport = StubTransport(status = 404, body = "{}")
         val provider = LRCLIBProvider(transport = transport, throttleMillis = 0)
 
         assertFailsWith<ProviderException.NotFound> {
-            provider.getLyrics(song(durationMillis = 233_000))
+            provider.getLyrics(song(duration = 233))
         }
 
         assertTrue(transport.lastUrl!!.contains("duration=233"))
+    }
+
+    @Test
+    fun acceptsFractionalDurationFromServer() = runBlocking {
+        // LRCLIB returns fractional-second durations (e.g. 321.0); this must not
+        // fail decoding into the LrcLibResponse model.
+        val body = """
+            {
+              "id": 3396226,
+              "trackName": "One More Time",
+              "duration": 321.0,
+              "syncedLyrics": "[00:30.28] One more time"
+            }
+        """.trimIndent()
+        val transport = StubTransport(status = 200, body = body)
+        val provider = LRCLIBProvider(transport = transport, throttleMillis = 0)
+
+        val lyrics = provider.getLyrics(song(title = "One More Time"))
+
+        assertNotNull(lyrics)
+        assertEquals("[00:30.28] One more time", lyrics.text)
     }
 
     @Test

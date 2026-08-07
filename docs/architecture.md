@@ -47,11 +47,11 @@ holding three things:
 
 `@Serializable` models shared by every module:
 
-- `Song(id, title, artists, album, duration, thumbnailUrl, streamUrl)`
+- `Song(id, title, artists, album, duration, thumbnailUrl, releaseDate)`
 - `Artist`, `Album`, `Playlist`
-- `Stream(url, format, bitrate, sampleRate, isLive, duration)`
+- `Stream(url, format, bitrate, sampleRate, isLive, duration, codec, mimeType)`
 - `Lyrics(text, source, synced)`
-- `Artwork(frontUrl, backUrl, thumbnails, sourceMbid)`
+- `Artwork(frontUrl, backUrl, thumbnails, sourceMbid, source, width, height)`
 - `SearchResult(songs, artists, albums, playlists)`
 - `PlaybackState` — `Idle`, `Playing`, `Paused`, `Buffering`, `Ended`, `Error`
 

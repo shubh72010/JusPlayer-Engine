@@ -19,11 +19,11 @@ class FakeProvider : MusicProvider {
     }
 
     override suspend fun getSong(id: String): Song {
-        return Song(id = id, title = "Test", artists = emptyList(), album = null, duration = 0, thumbnailUrl = null, streamUrl = null)
+        return Song(id = id, title = "Test", artists = emptyList(), album = null, duration = 0, thumbnailUrl = null)
     }
 
     override suspend fun getStream(songId: String): org.jusplayer.engine.model.Stream {
-        return org.jusplayer.engine.model.Stream("", "mp3", 0, 0, false, 0)
+        return org.jusplayer.engine.model.Stream("", "mp3", bitrate = null, sampleRate = null, isLive = false, duration = 0)
     }
 }
 

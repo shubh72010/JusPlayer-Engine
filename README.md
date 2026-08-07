@@ -32,7 +32,7 @@ a plain JVM.
 | **Coroutine flows** | `StateFlow` state, `SharedFlow` events, all `suspend`-friendly |
 | **Zero Android deps** | Plain JVM — CLIs, servers, desktop, or Android |
 | **DSL builder** | `createJusPlayer { ... }` wires everything in one call |
-| **HTTP server** | Optional Ktor module exposes the engine over REST |
+| **HTTP server** | Optional Ktor module exposes the engine over REST, with an in-built browser demo at `/` |
 
 ## 30-second example
 
@@ -78,11 +78,11 @@ Requires **JDK 11+** (JDK 21 recommended) and a Maven repo.
 repositories { maven(url = "https://jitpack.io") }
 
 dependencies {
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.1.0")
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.1.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.3.0")
     // optional:
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.1.0")
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.1.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.3.0")
 }
 ```
 
@@ -109,7 +109,8 @@ dependencies {
 ```bash
 JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew build          # compile + test all modules
 JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :sample-console:run
-JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :engine-http:run     # REST server, port 8368
+JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :engine-http:run     # REST server on :8368; auto-opens the browser demo at /
+# port override: --args=9000 or env JUS_ENGINE_PORT
 ```
 
 ## License

@@ -1,8 +1,49 @@
 # Migration
 
-> There are currently **no released API-breaking changes** to migrate from. This
-> page documents the history and what to do if you're coming from a broken/old
-> build.
+> This page documents breaking changes **with exact before/after snippets**. Last
+> reviewed for `v1.3.0`; for routine version bumps see [Updating](updating.md).
+
+## 1.2.0 → 1.3.0 (model changes)
+
+`v1.3.0` touches the `Song` and `Stream` models and the HTTP lyrics/artwork
+responses.
+
+### `Song.streamUrl` was removed
+
+Stream URLs belong on the stream you fetch via `getStream`, not on the search
+result. If you read `song.streamUrl`, drop that line and use the provider's stream
+instead.
+
+### `Stream` fields changed
+
+`Stream` gained `codec`/`mimeType`, and two fields changed shape:
+
+| Field | 1.2.0 | 1.3.0 |
+|-------|-------|-------|
+| `bitrate` | `Int` (kbps) | `Long?` — **bits per second** (`null` if unknown) |
+| `sampleRate` | `Int` | `Int?` — `null` if the provider can't determine it |
+
+So `bitrate` for a 160 kbps file is now `160000`, not `160`. In code that consumes
+a stream: convert `bitrate / 1000` to get kbps, and nullable-check both fields.
+
+### Lyrics/artwork over HTTP now return a status envelope
+
+`GET /v1/lyrics/{id}` and `GET /v1/artwork/{id}` no longer return the bare model
+(or `{"error": ...}` on failure). They return:
+
+```json
+{
+  "status": "ok" | "not_found" | "error",
+  "provider": "LRCLIB",
+  "message": "only set on not_found/error",
+  "lyrics":  { … },   // present when status is "ok"
+  "artwork": { … }    // present when status is "ok"
+}
+```
+
+`not_found` (a valid miss) and `error` (provider failure) are both HTTP 200 — read
+the `status` field rather than the HTTP code. The [HTTP Server](http-server.md)
+doc has full examples.
 
 ## The 1.0.0 → 1.1.0 fix (coordinate change)
 
