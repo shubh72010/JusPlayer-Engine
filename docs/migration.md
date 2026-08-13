@@ -1,8 +1,64 @@
 # Migration
 
-> There are currently **no released API-breaking changes** to migrate from. This
-> page documents the history and what to do if you're coming from a broken/old
-> build.
+> This page documents breaking changes **with exact before/after snippets**. Last
+> reviewed for `v1.4.0`; for routine version bumps see [Updating](updating.md).
+
+## 1.3.0 → 1.4.0 (merged release)
+
+`v1.4.0` merges the `v1.3.0` model/HTTP changes with the engine-autoplay /
+recommendations / HTTP player-API work. Two `v1.3.0`-era notes no longer apply:
+
+- `Song.streamUrl` was **kept** in `v1.4.0` (the 1.3.0 removal was reverted in the
+  merge). It's still `null` for NewPipe songs — fetch URLs via `getStream` — but
+  the field exists for custom providers.
+- New HTTP endpoints landed: `/v1/recommendations/{id}` and the
+  `/v1/player/*` controls (state/play/next/previous/pause/stop/seek/song-ended/
+  queue/repeat/shuffle/autoplay). See [HTTP Server](http-server.md).
+
+## 1.2.0 → 1.3.0 (model changes)
+
+`v1.3.0` touches the `Song` and `Stream` models and the HTTP lyrics/artwork
+responses.
+
+### `Song.streamUrl` was removed in 1.3.0
+
+> **Note:** `v1.4.0` re-added `streamUrl` when merging the two feature lines, so the
+> removal below applies only to the standalone `v1.3.0` tag.
+
+Stream URLs belong on the stream you fetch via `getStream`, not on the search
+result. If you read `song.streamUrl`, drop that line and use the provider's stream
+instead.
+
+### `Stream` fields changed
+
+`Stream` gained `codec`/`mimeType`, and two fields changed shape:
+
+| Field | 1.2.0 | 1.3.0 |
+|-------|-------|-------|
+| `bitrate` | `Int` (kbps) | `Long?` — **bits per second** (`null` if unknown) |
+| `sampleRate` | `Int` | `Int?` — `null` if the provider can't determine it |
+
+So `bitrate` for a 160 kbps file is now `160000`, not `160`. In code that consumes
+a stream: convert `bitrate / 1000` to get kbps, and nullable-check both fields.
+
+### Lyrics/artwork over HTTP now return a status envelope
+
+`GET /v1/lyrics/{id}` and `GET /v1/artwork/{id}` no longer return the bare model
+(or `{"error": ...}` on failure). They return:
+
+```json
+{
+  "status": "ok" | "not_found" | "error",
+  "provider": "LRCLIB",
+  "message": "only set on not_found/error",
+  "lyrics":  { … },   // present when status is "ok"
+  "artwork": { … }    // present when status is "ok"
+}
+```
+
+`not_found` (a valid miss) and `error` (provider failure) are both HTTP 200 — read
+the `status` field rather than the HTTP code. The [HTTP Server](http-server.md)
+doc has full examples.
 
 ## The 1.0.0 → 1.1.0 fix (coordinate change)
 

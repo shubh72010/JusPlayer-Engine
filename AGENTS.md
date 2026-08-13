@@ -15,7 +15,7 @@ authoritative and detailed — read it before changing behavior.
   JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew test
   JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :engine-queue:test   # single module
   JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :sample-console:run  # demo app
-  JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :engine-http:run     # REST server, port 8368
+  JAVA_HOME=/usr/lib/jvm/java-21-temurin-jdk ./gradlew :engine-http:run     # REST server, port 8368; serves a browser demo at / and auto-opens it
   # server port: --args=9000 or env JUS_ENGINE_PORT
   ```
 - **Versioning/publishing:** the version lives in **one place** — `version=` in
@@ -43,11 +43,12 @@ accurate when changing APIs — the docs are the first thing a new user reads.
 
 ## Module layout
 
-Dependency flow is bottom-up: `engine-utils` → `engine-model`; `engine-events`,
-`engine-playback-api`, `engine-provider-api`, `engine-queue`, `engine-autoplay`
-→ `engine-core`; `engine-provider-api` → `engine-provider-newpipe`,
-`engine-provider-lrclib`, `engine-provider-coverartarchive`; `engine-api` is the DSL
-facade; `engine-http` and `sample-console` consume everything.
+Dependency flow is bottom-up: `engine-utils` and `engine-model` are independent
+leaves (don't depend on each other); `engine-events`, `engine-playback-api`,
+`engine-provider-api`, `engine-queue`, `engine-autoplay` → `engine-core`;
+`engine-provider-api` → `engine-provider-newpipe`, `engine-provider-lrclib`,
+`engine-provider-coverartarchive`; `engine-api` is the DSL facade;
+`engine-http` and `sample-console` consume everything.
 
 - `engine-provider-newpipe` is the **only** module importing NewPipeExtractor types.
   Public APIs expose only `@Serializable` models and `ProviderException`; the objects in

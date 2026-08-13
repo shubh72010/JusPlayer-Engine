@@ -29,16 +29,17 @@ That's the whole contract — four methods plus an optional position report.
 data class Stream(
     val url: String,
     val format: String,
-    val bitrate: Int,
-    val sampleRate: Int,
+    val bitrate: Long?,   // bits per second
+    val sampleRate: Int?, // Hz, null when unknown
     val isLive: Boolean,
     val duration: Long,
+    val codec: String?,
+    val mimeType: String?,
 )
 ```
 
 `url` is a direct media URL (e.g. a YouTube audio stream). `isLive` tells you
-whether it's a live broadcast (seek behavior differs). `duration` is in
-milliseconds.
+whether it's a live broadcast (seek behavior differs). `duration` is in seconds.
 
 ## A minimal adapter
 

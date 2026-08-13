@@ -34,7 +34,7 @@ class StreamMapperTest {
 
         assertEquals("https://example.com/high.m4a", stream.url)
         assertEquals("m4a", stream.format)
-        assertEquals(320_000, stream.bitrate)
+        assertEquals(320_000L, stream.bitrate)
         assertEquals(240, stream.duration)
         assertFalse(stream.isLive)
     }

@@ -15,4 +15,7 @@ data class Artwork(
     val backUrl: String? = null,
     val thumbnails: Map<String, String> = emptyMap(),
     val sourceMbid: String? = null,
+    val source: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )

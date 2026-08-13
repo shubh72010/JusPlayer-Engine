@@ -49,7 +49,7 @@ Community providers are welcome.
 ## How do updates work?
 
 Versions are git tags published through JitPack. Bump the version string in your
-`build.gradle.kts` (e.g. `1.1.0` → `1.2.0`), sync, done. See [Updating](updating.md)
+`build.gradle.kts` (e.g. `1.2.0` → `1.3.0`), sync, done. See [Updating](updating.md)
 and [Migration](migration.md).
 
 ## Why JitPack and not Maven Central?

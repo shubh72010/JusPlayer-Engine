@@ -32,6 +32,7 @@ object SongMapper {
             duration = info.duration.coerceAtLeast(0),
             thumbnailUrl = info.thumbnails.firstOrNull()?.url,
             streamUrl = null,
+            releaseDate = info.textualUploadDate,
         )
     }
 }

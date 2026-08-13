@@ -8,10 +8,12 @@ data class Song(
     val title: String,
     val artists: List<Artist>,
     val album: Album?,
+    /** Duration in seconds. */
     val duration: Long,
     val thumbnailUrl: String?,
     val streamUrl: String?,
     val genres: List<String> = emptyList(),
+    val releaseDate: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -74,10 +76,15 @@ data class Playlist(
 data class Stream(
     val url: String,
     val format: String,
-    val bitrate: Int,
-    val sampleRate: Int,
+    /** Bits per second. */
+    val bitrate: Long? = null,
+    /** Sample rate in Hz, or null when the provider can't determine it. */
+    val sampleRate: Int? = null,
     val isLive: Boolean,
+    /** Duration in seconds. */
     val duration: Long,
+    val codec: String? = null,
+    val mimeType: String? = null,
 )
 
 @Serializable

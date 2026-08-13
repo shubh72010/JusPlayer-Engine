@@ -1,5 +1,6 @@
 package org.jusplayer.engine.http
 
+import io.ktor.http.ContentType
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
@@ -12,6 +13,8 @@ import io.ktor.server.routing.*
 import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
+import java.awt.Desktop
+import java.net.URI
 import org.jusplayer.engine.api.createJusPlayer
 import org.jusplayer.engine.autoplay.AutoplayConfig
 import org.jusplayer.engine.autoplay.AutoplayContext
@@ -19,6 +22,8 @@ import org.jusplayer.engine.autoplay.RecommendationProvider
 import org.jusplayer.engine.events.SongEnded
 import org.jusplayer.engine.model.Album
 import org.jusplayer.engine.model.Artist
+import org.jusplayer.engine.model.Artwork
+import org.jusplayer.engine.model.Lyrics
 import org.jusplayer.engine.model.PlaybackState
 import org.jusplayer.engine.model.RepeatMode
 import org.jusplayer.engine.model.Song as JpSong
@@ -40,25 +45,32 @@ fun main(args: Array<String>) {
 
 class JusPlayerHttpEngine(private val port: Int = 8368) {
     private val provider: MusicProvider = NewPipeProvider()
+    private val lyricsProvider = LRCLIBProvider()
+    private val artworkProvider = CoverArtArchiveProvider()
+    private val releaseResolver = MusicBrainzResolver()
 
     private val player = runBlocking {
         createJusPlayer {
             provider(this@JusPlayerHttpEngine.provider)
-            lyricsProvider(LRCLIBProvider())
-            artworkProvider(CoverArtArchiveProvider())
-            releaseResolver(MusicBrainzResolver())
+            lyricsProvider(this@JusPlayerHttpEngine.lyricsProvider)
+            artworkProvider(this@JusPlayerHttpEngine.artworkProvider)
+            releaseResolver(this@JusPlayerHttpEngine.releaseResolver)
             player(NoopPlayerAdapter())
-            // Bake autoplay into the engine: search the current song's artists to
-            // generate candidates, then let the engine's real pipeline (dedupe,
-            // exclude, score, rank, diversify) decide what actually gets queued.
+            // Bake autoplay into the engine: prefer the platform's own
+            // recommendations (YouTube related streams) and blend in session
+            // search, then let the engine's real pipeline (dedupe, exclude,
+            // score, rank, diversify) decide what actually gets queued.
             recommendationProvider(SearchRecommendationProvider(this@JusPlayerHttpEngine.provider))
             autoplay(AutoplayConfig(bufferSize = 5, maxConsecutiveSameArtist = 2))
             autoplayEnabled(true)
         }
     }
 
-    fun start() {
+    fun start(openBrowser: Boolean = true) {
         embeddedServer(Netty, port = port) {
+            environment.monitor.subscribe(ApplicationStarted) {
+                if (openBrowser) this@JusPlayerHttpEngine.openBrowser("http://localhost:$port/")
+            }
             install(ContentNegotiation) {
                 json()
             }
@@ -66,37 +78,36 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 anyHost()
             }
             routing {
+                // Self-contained browser demo (Player/Details/Developer), auto-opened.
                 get("/") {
+                    val html = javaClass.classLoader.getResource("index.html")
+                    if (html == null) {
+                        call.respondText("Demo UI not found", ContentType.Text.Plain)
+                    } else {
+                        call.respondText(html.readText(), ContentType.Text.Html)
+                    }
+                }
+                get("/health") { call.respond(mapOf("status" to "ok")) }
+
+                get("/v1/diagnostics") {
                     call.respond(
-                        RootResponse(
-                            service = "JusPlayer Engine HTTP",
-                            endpoints = listOf(
-                                "GET /health",
-                                "GET /v1/search?q=",
-                                "GET /v1/stream/{id}",
-                                "GET /v1/lyrics/{id}",
-                                "GET /v1/artwork/{id}",
-                                "GET /v1/recommendations/{id}",
-                                "GET /v1/player/state",
-                                "POST /v1/player/play/{id}",
-                                "POST /v1/player/next",
-                                "POST /v1/player/previous",
-                                "POST /v1/player/pause",
-                                "POST /v1/player/stop",
-                                "POST /v1/player/seek?ms=",
-                                "POST /v1/player/song-ended",
-                                "POST /v1/player/queue/add/{id}",
-                                "POST /v1/player/queue/remove/{index}",
-                                "POST /v1/player/queue/clear",
-                                "POST /v1/player/repeat?mode=NONE|ONE|ALL",
-                                "POST /v1/player/shuffle?enabled=",
-                                "POST /v1/player/autoplay?enabled=",
+                        DiagnosticsResponse(
+                            musicProvider = ProviderInfo(
+                                name = provider.name,
+                                capabilities = CapabilitiesInfo(
+                                    search = provider.capabilities.search,
+                                    getSong = provider.capabilities.getSong,
+                                    getStream = provider.capabilities.getStream,
+                                    playlists = provider.capabilities.playlists,
+                                    recommendations = provider.capabilities.recommendations,
+                                ),
                             ),
+                            lyricsProvider = lyricsProvider.name,
+                            artworkProvider = artworkProvider.name,
+                            releaseResolver = releaseResolver.name,
                         ),
                     )
                 }
-
-                get("/health") { call.respond(mapOf("status" to "ok")) }
 
                 get("/v1/search") {
                     val q = call.parameters["q"]
@@ -124,31 +135,43 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
 
                 get("/v1/lyrics/{id}") {
                     val id = call.parameters["id"] ?: ""
-                    runCatching {
+                    try {
                         val song = runBlocking { provider.getSong(id) }
                         val lyrics = runBlocking { player.engine.lyrics(song) }
                         if (lyrics != null) {
-                            call.respond(lyrics)
+                            call.respond(LyricsResponse(status = "ok", provider = lyricsProvider.name, lyrics = lyrics))
                         } else {
-                            call.respond(mapOf("error" to "lyrics unavailable"))
+                            call.respond(
+                                LyricsResponse(
+                                    status = "not_found",
+                                    provider = lyricsProvider.name,
+                                    message = "no lyrics found for this track",
+                                ),
+                            )
                         }
-                    }.getOrElse {
-                        call.respond(mapOf("error" to (it.message ?: "unknown")))
+                    } catch (e: Exception) {
+                        call.respond(LyricsResponse(status = "error", provider = lyricsProvider.name, message = e.message))
                     }
                 }
 
                 get("/v1/artwork/{id}") {
                     val id = call.parameters["id"] ?: ""
-                    runCatching {
+                    try {
                         val song = runBlocking { provider.getSong(id) }
                         val artwork = runBlocking { player.engine.artwork(song) }
                         if (artwork != null) {
-                            call.respond(artwork)
+                            call.respond(ArtworkResponse(status = "ok", provider = artworkProvider.name, artwork = artwork))
                         } else {
-                            call.respond(mapOf("error" to "artwork unavailable"))
+                            call.respond(
+                                ArtworkResponse(
+                                    status = "not_found",
+                                    provider = artworkProvider.name,
+                                    message = "no artwork found for this track",
+                                ),
+                            )
                         }
-                    }.getOrElse {
-                        call.respond(mapOf("error" to (it.message ?: "unknown")))
+                    } catch (e: Exception) {
+                        call.respond(ArtworkResponse(status = "error", provider = artworkProvider.name, message = e.message))
                     }
                 }
 
@@ -305,6 +328,18 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
             autoplayCandidates = player.engine.autoplayCandidates.value,
         )
     }
+
+    private fun openBrowser(url: String) {
+        try {
+            if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                println("Not opening browser automatically: AWT Desktop unavailable. Open $url")
+                return
+            }
+            Desktop.getDesktop().browse(URI(url))
+        } catch (e: Exception) {
+            println("Could not open browser automatically (open $url): ${e.message}")
+        }
+    }
 }
 
 /**
@@ -397,12 +432,6 @@ private class NoopPlayerAdapter : PlayerAdapter {
 }
 
 @Serializable
-data class RootResponse(
-    val service: String,
-    val endpoints: List<String>,
-)
-
-@Serializable
 data class SearchResponse(
     val songs: List<JpSong>,
     val artists: List<Artist> = emptyList(),
@@ -422,6 +451,50 @@ data class PlayerStateResponse(
 )
 
 @Serializable
+data class LyricsResponse(
+    val status: String,
+    val provider: String? = null,
+    val message: String? = null,
+    val lyrics: Lyrics? = null,
+)
+
+@Serializable
+data class ArtworkResponse(
+    val status: String,
+    val provider: String? = null,
+    val message: String? = null,
+    val artwork: Artwork? = null,
+)
+
+@Serializable
+data class StreamResponse(
+    val stream: JpStream
+)
+
+@Serializable
 data class ErrorResponse(
     val error: String
+)
+
+@Serializable
+data class DiagnosticsResponse(
+    val musicProvider: ProviderInfo,
+    val lyricsProvider: String,
+    val artworkProvider: String,
+    val releaseResolver: String,
+)
+
+@Serializable
+data class ProviderInfo(
+    val name: String,
+    val capabilities: CapabilitiesInfo,
+)
+
+@Serializable
+data class CapabilitiesInfo(
+    val search: Boolean,
+    val getSong: Boolean,
+    val getStream: Boolean,
+    val playlists: Boolean,
+    val recommendations: Boolean,
 )

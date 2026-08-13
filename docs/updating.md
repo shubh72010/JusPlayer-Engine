@@ -16,7 +16,7 @@ becomes
 
 ```kotlin
 dependencies {
-    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.2.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.3.0")
 }
 ```
 
@@ -27,10 +27,10 @@ Sync Gradle. Done.
 Every module coordinate uses the same version, so update them all together:
 
 ```kotlin
-implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.2.0")
-implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.2.0")
-implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.2.0")
-implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.2.0")
+implementation("com.github.shubh72010.JusPlayer-Engine:engine-api:1.3.0")
+implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-newpipe:1.3.0")
+implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.3.0")
+implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.3.0")
 ```
 
 You only need to change the ones you depend on explicitly.
@@ -53,6 +53,5 @@ to `1.1.0` or later. See [Migration](migration.md).
 
 ## Breaking changes
 
-When a release introduces breaking API changes, the
-[Migration Guide](migration.md) will document the exact steps. Currently there are
-no released breaking changes to migrate from.
+`v1.3.0` introduces breaking API changes — see the [Migration Guide](migration.md).
+Before `v1.3.0` there were no released changes to migrate from.
