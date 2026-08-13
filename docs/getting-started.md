@@ -31,12 +31,12 @@ val jusPlayer = createJusPlayer {
 The engine then gives you:
 
 - `engine.search("...")` — find songs
-- `engine.play(song)` / `pause()` / `stop()` / `seek(...)` — drive playback
+- `engine.play(song)` / `pause()` / `stop()` / `seek(...)` / `next()` / `previous()` — drive playback
 - `engine.lyrics(song)` — fetch lyrics (if a lyrics provider is registered)
 - `engine.artwork(song)` — fetch cover art (if resolver + artwork provider are registered)
-- `queue` — add, move, shuffle, next/previous
-- `state` / `currentSong` — observable coroutine flows
-- `events` — a `SharedFlow` of `SongStarted`, `SongEnded`, `QueueChanged`, ...
+- `queue` — add, move, shuffle, next/previous, repeat mode
+- `state` / `currentSong` / `queueState` / `autoplayCandidates` — observable coroutine flows
+- `events` — a `SharedFlow` of `SongStarted`, `SongEnded`, `QueueChanged`, `AutoplayEnqueued`, ...
 
 ## What does the engine do?
 
@@ -45,8 +45,13 @@ The engine then gives you:
 - **Metadata & stream URLs** — never audio bytes; you get clean, serializable models.
 - **Lyrics** — matched from song metadata (title/artist/album/duration), not streaming IDs.
 - **Artwork** — resolved from a `Song` → MusicBrainz release → Cover Art Archive URLs.
-- **Queue** — a small `QueueEngine` for ordered playback.
-- **Playback engine** — calls your `PlayerAdapter` and tracks state via events.
+- **Queue** — a thread-safe `QueueEngine` (cursor, shuffle, repeat) as the single
+  source of truth for what is queued.
+- **Playback engine** — calls your `PlayerAdapter`, tracks state via events, and
+  auto-advances on `SongEnded`.
+- **Autoplay** — when the queue is exhausted and you registered a
+  `recommendationProvider(...)`, it replenishes the queue with scored, diversified
+  follow-ups based on your listening history.
 
 ## What doesn't the engine do?
 

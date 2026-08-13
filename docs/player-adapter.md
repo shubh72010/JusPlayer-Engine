@@ -14,10 +14,14 @@ interface PlayerAdapter {
     fun pause()
     fun stop()
     fun seek(position: Duration)
+
+    /** Current playback position, if your media engine can report it (defaults to null). */
+    val position: Duration?
+        get() = null
 }
 ```
 
-That's the whole contract — four methods.
+That's the whole contract — four methods plus an optional position report.
 
 ### The `Stream` you receive
 
@@ -70,10 +74,18 @@ createJusPlayer {
 Because `play` is `suspend`, long setup (prepare, buffer, open the URL) can run
 suspending code without blocking the caller.
 
+### The `position` property
+
+Supplying `position` makes `engine.previous()` behave like a real media player:
+more than 3 seconds in, `previous()` restarts the track (`seek(0)`); within the
+first 3 seconds it goes back one queue item. Without a position, `previous()`
+always goes back one.
+
 ## Events you should emit
 
-The engine tracks state by *listening to your events* on the `EventBus` — it does
-not assume anything. When your adapter actually starts/ends audio, emit:
+The engine tracks state by *listening to your events* on the `EventBus`. Emitting
+`SongEnded` is also what powers **auto-advance**: the engine advances the queue,
+starts the next track, and — when the queue is empty — asks autoplay to restock.
 
 ```kotlin
 import org.jusplayer.engine.events.EventBus
@@ -84,9 +96,10 @@ suspend fun notifyStarted(bus: EventBus, song: Song) = bus.emit(SongStarted(song
 suspend fun notifyEnded(bus: EventBus, song: Song) = bus.emit(SongEnded(song, positionMs))
 ```
 
-This drives `jusPlayer.state` (`Playing` on `SongStarted`, `Ended` on `SongEnded`)
-and `jusPlayer.currentSong`. If you never emit, state stays `Idle`/`Paused` —
-the engine is manual by design.
+`SongEnded` is the **natural-end** signal and must only be emitted when audio
+actually reached its end. Manual actions (`stop`, `next`, `previous`, `pause`)
+must never emit it — otherwise they'd be mistaken for a natural end and could
+accidentally trigger autoplay or advance the wrong track.
 
 ## Adapters for real engines
 

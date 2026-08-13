@@ -100,10 +100,13 @@ by those MBIDs, not by streaming-service ids. So a `ReleaseResolver` maps your
 
 ## Is playback gapless / auto-advancing?
 
-Not yet. Playback is **manual**: the engine tracks events you emit and does not
-self-drive transitions. Auto-advance on `SongEnded` is on the roadmap — in the
-meantime your app (or player adapter) listens for `SongEnded` and calls
-`queue.next()` + `engine.play()`.
+Auto-advance is built in. When your player (or adapter) reaches the natural end of
+a track, emit `SongEnded` on the event bus and the engine advances the queue,
+starts the next track, and — when the queue is exhausted under `RepeatMode.NONE` —
+hands over to autoplay. Manual operations (`stop`, `next`, `previous`, `pause`)
+never look like a natural end, so they can't accidentally trigger autoplay.
+Gapless playback still depends on your `PlayerAdapter` (ExoPlayer gapless, for
+example, needs seamless transitions from the adapter itself).
 
 ## Which JDK do I need?
 

@@ -20,6 +20,9 @@ authoritative and detailed — read it before changing behavior.
   ```
 - **Versioning/publishing:** the version lives in **one place** — `version=` in
   `gradle.properties`. To release: bump it there, then `git tag v<version>` and push.
+  README/docs code samples may pin an older version literal (e.g. README installs at
+  `1.1.0` while `gradle.properties` is `1.2.0`) — don't "fix" those when bumping; the
+  only source of truth is `gradle.properties`.
   `./gradlew publishToMavenLocal` publishes every module as
   `com.github.shubh72010.JusPlayer-Engine:<module>:<version>` — the group MUST be
   the `com.github.<owner>.<repo>` form or JitPack won't harvest submodules (it only
@@ -41,10 +44,10 @@ accurate when changing APIs — the docs are the first thing a new user reads.
 ## Module layout
 
 Dependency flow is bottom-up: `engine-utils` → `engine-model`; `engine-events`,
-`engine-playback-api`, `engine-provider-api`, `engine-queue` → `engine-core`;
-`engine-provider-api` → `engine-provider-newpipe`, `engine-provider-lrclib`,
-`engine-provider-coverartarchive`; `engine-api` is the DSL facade;
-`engine-http` and `sample-console` consume everything.
+`engine-playback-api`, `engine-provider-api`, `engine-queue`, `engine-autoplay`
+→ `engine-core`; `engine-provider-api` → `engine-provider-newpipe`,
+`engine-provider-lrclib`, `engine-provider-coverartarchive`; `engine-api` is the DSL
+facade; `engine-http` and `sample-console` consume everything.
 
 - `engine-provider-newpipe` is the **only** module importing NewPipeExtractor types.
   Public APIs expose only `@Serializable` models and `ProviderException`; the objects in
@@ -58,8 +61,31 @@ Dependency flow is bottom-up: `engine-utils` → `engine-model`; `engine-events`
   return `null` when the corresponding provider isn't registered.
 - `engine-api` (`createJusPlayer { provider(...) player(...) }`) **requires** a
   `PlayerAdapter` — it throws `IllegalStateException` otherwise. There is no default player.
-- Playback is manual: `JusPlayerEngine` listens for `SongStarted`/`SongEnded` on the
-  `EventBus` to update `StateFlow` state; it does not self-drive transitions.
+  Optional autoplay wiring: `recommendationProvider(...)` (repeatable),
+  `autoplayEnabled(...)`, `autoplay(config)`.
+- `engine-queue` is the **single source of truth**: `QueueEngine` owns contents,
+  cursor, shuffle, and repeat, published atomically as a `QueueSnapshot` on its
+  `state` `StateFlow`. `next()` returns `null` at exhaustion under
+  `RepeatMode.NONE` (that's what triggers autoplay); `ONE` re-selects current,
+  `ALL` wraps; `shuffle()` keeps the current track first and remembers the
+  pre-shuffle order for `restore()`; `addNext()` inserts right after current.
+  Pure helper functions live in `QueueOrder` (`internal object`, unit-tested).
+- Progression is **event-driven**: `JusPlayerEngine` listens for `SongEnded` on the
+  `EventBus`, advances the queue, and plays the next track via `PlaybackService`.
+  All queue/playback transitions are serialized through an internal `Mutex`. When
+  the queue is exhausted under `RepeatMode.NONE` (autoplay enabled, an engine
+  exists, a current song exists) it asks the optional `AutoplayEngine` to replenish.
+  `stop()` emits `PlaybackStopped` and never triggers autoplay. Manual operations
+  (`next`, `previous`, `stop`, `pause`, `clear`) must never emit `SongEnded`.
+- `engine-autoplay` owns `RecommendationProvider` (candidate source),
+  `AutoplayHistory` (starts/completions/skips + artist/genre affinity),
+  `AutoplayPipeline` (pure: dedupe → exclude → score → rank → diversify → take),
+  and `DefaultAutoplayEngine` (aggregates providers, per-call timeout). The engine
+  records engagement signals synchronously in `AutoplayHistory` and exposes the
+  latest candidates on `autoplayCandidates`.
+- `PlayerAdapter.position: Duration?` is a defaulted interface property — supplying
+  it lets `previous()` restart the current track when `> RESTART_THRESHOLD_MS`
+  (`3000`) in, instead of always going back one.
 
 ## Provider contract
 
@@ -78,6 +104,9 @@ Non-NewPipe providers share the `HttpTransport`/`JdkHttpTransport` in
 
 ## Gotchas
 
+- `settings.gradle.kts` uses `dependencyResolutionManagement` with
+  `RepositoriesMode.FAIL_ON_PROJECT_REPOS` — declare repos **only** there, never in a
+  module's `build.gradle.kts` (Gradle errors on project-scoped repos).
 - `net.newpipe:extractor:v0.26.4` resolves from `mavenLocal()` (JitPack can't build recent
   tags). If resolution fails locally, build it first:
   `git clone --branch v0.26.4 https://github.com/TeamNewPipe/NewPipeExtractor.git && cd NewPipeExtractor && ./gradlew publishToMavenLocal`

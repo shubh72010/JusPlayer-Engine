@@ -9,6 +9,7 @@ import org.jusplayer.engine.model.Stream
 import org.jusplayer.engine.provider.MusicProvider
 import org.jusplayer.engine.provider.ProviderCapabilities
 import org.jusplayer.engine.provider.ProviderException
+import org.jusplayer.engine.provider.RelatedProvider
 import org.jusplayer.engine.provider.newpipe.cache.ProviderCache
 import org.jusplayer.engine.provider.newpipe.mapping.SearchResultMapper
 import org.jusplayer.engine.provider.newpipe.mapping.SongMapper
@@ -29,7 +30,7 @@ import java.io.IOException
  * All NewPipeExtractor types are confined to this module: callers only ever see
  * the engine's own models and [ProviderException].
  */
-class NewPipeProvider : MusicProvider {
+class NewPipeProvider : MusicProvider, RelatedProvider {
 
     private val cache: ProviderCache
     private val downloader: Downloader
@@ -50,6 +51,7 @@ class NewPipeProvider : MusicProvider {
         search = true,
         getSong = true,
         getStream = true,
+        recommendations = true,
     )
 
     override suspend fun search(query: String): SearchResult = withContext(Dispatchers.IO) {
@@ -95,6 +97,27 @@ class NewPipeProvider : MusicProvider {
             duration = info.duration,
         )
     }
+
+    override suspend fun getRecommendations(songId: String, limit: Int): List<Song> =
+        withContext(Dispatchers.IO) {
+            val cacheKey = "related:$songId:$limit"
+            cache.get<List<Song>>(cacheKey)?.let { return@withContext it }
+
+            val info = runExtraction("Get related streams $songId") {
+                withRetry {
+                    StreamInfo.getInfo(ServiceList.YouTube, songId)
+                }
+            }
+
+            val songs = info.relatedItems
+                .filterIsInstance<org.schabi.newpipe.extractor.stream.StreamInfoItem>()
+                .filter { it.url != songId }
+                .take(limit)
+                .map { SongMapper.map(it) }
+
+            cache.put(cacheKey, songs)
+            songs
+        }
 
     /**
      * Retries an extraction when the extractor reports that the page needs to be

@@ -1,7 +1,9 @@
 package org.jusplayer.engine.api
 
-import org.jusplayer.engine.core.JusPlayerEngine
+import org.jusplayer.engine.autoplay.AutoplayConfig
+import org.jusplayer.engine.autoplay.RecommendationProvider
 import org.jusplayer.engine.core.JusPlayerConfig
+import org.jusplayer.engine.core.JusPlayerEngine
 import org.jusplayer.engine.events.EventBus
 import org.jusplayer.engine.model.PlaybackState
 import org.jusplayer.engine.model.Song
@@ -21,6 +23,13 @@ class JusPlayerBuilder internal constructor() {
     var lyricsProvider: LyricsProvider? = null
     var artworkProvider: ArtworkProvider? = null
     var releaseResolver: ReleaseResolver? = null
+    var autoplayConfig: AutoplayConfig? = null
+
+    private val _recommendationProviders = mutableListOf<RecommendationProvider>()
+    val recommendationProviders: List<RecommendationProvider> = _recommendationProviders
+
+    /** Defaults to `true` when at least one [recommendationProvider] is registered. */
+    var autoplayEnabled: Boolean? = null
 
     fun provider(provider: MusicProvider) {
         this.provider = provider
@@ -50,6 +59,20 @@ class JusPlayerBuilder internal constructor() {
         this.queueEngine = engine
     }
 
+    /** Registers an autoplay candidate source. Call multiple times to combine sources. */
+    fun recommendationProvider(provider: RecommendationProvider) {
+        _recommendationProviders += provider
+    }
+
+    fun autoplayEnabled(enabled: Boolean) {
+        this.autoplayEnabled = enabled
+    }
+
+    /** Tunes the autoplay pipeline (buffer size, recency window, diversity, ...). */
+    fun autoplay(config: AutoplayConfig) {
+        this.autoplayConfig = config
+    }
+
     internal fun build(): JusPlayer {
         val resolvedEventBus = eventBus ?: EventBus()
         val resolvedQueue = queueEngine ?: QueueEngine()
@@ -60,6 +83,9 @@ class JusPlayerBuilder internal constructor() {
             lyricsProvider = lyricsProvider,
             artworkProvider = artworkProvider,
             releaseResolver = releaseResolver,
+            recommendationProviders = recommendationProviders,
+            autoplayConfig = autoplayConfig,
+            autoplayEnabled = autoplayEnabled ?: recommendationProviders.isNotEmpty(),
         )
         val engine = JusPlayerEngine(config, resolvedEventBus, resolvedQueue, resolvedPlayer)
         return JusPlayer(engine, resolvedQueue, resolvedEventBus)
@@ -79,6 +105,18 @@ class JusPlayer internal constructor(
 
     val currentSong: Song?
         get() = engine.currentSong.value
+
+    val repeatMode: org.jusplayer.engine.model.RepeatMode
+        get() = queue.repeatMode
+
+    val shuffleEnabled: Boolean
+        get() = queue.shuffleEnabled
+
+    val hasNext: Boolean
+        get() = queue.hasNext
+
+    val autoplayEnabled: Boolean
+        get() = engine.autoplayEnabled.value
 }
 
 fun createJusPlayer(build: JusPlayerBuilder.() -> Unit): JusPlayer {

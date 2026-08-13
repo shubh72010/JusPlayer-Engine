@@ -133,17 +133,20 @@ class VlcjPlayerAdapter : PlayerAdapter {
 
 ## Emitting events (important)
 
-The engine updates `state` and `currentSong` only from events you emit:
+The engine updates `state` and `currentSong` from events you emit, and uses
+`SongEnded` as the **natural-end** trigger to auto-advance (or autoplay):
 
 | You emit | Engine does |
 |----------|-------------|
 | `SongStarted(song, position)` | `state = Playing`, `currentSong = song` |
-| `SongEnded(song, position)` | `state = Ended`, `currentSong = null` |
+| `SongEnded(song, position)` | advance queue → play next; autoplay when empty |
 | `PlaybackPaused(song, position)` | `state = Paused` |
 
-If you never emit, `jusPlayer.state` stays `Idle` — the engine is **manual by
-design**. Emitting from `play()`'s success path and your engine's "ended" callback
-keeps everything in sync.
+If you never emit, `jusPlayer.state` stays `Idle`. Emit `SongStarted` from
+`play()`'s success path and `SongEnded` from your engine's "ended" callback.
+`SongEnded` must only fire when audio really reached its end — manual operations
+(`stop`, `next`, `previous`) must never emit it, or they'd be mistaken for a
+natural end.
 
 ## Checklist
 

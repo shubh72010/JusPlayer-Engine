@@ -32,7 +32,9 @@ val next = jusPlayer.queue.next()      // advances the cursor
 if (next != null) jusPlayer.engine.play(next)
 ```
 
-`queue.next()` advances but does **not** auto-play — call `engine.play()` yourself.
+`engine.next()` does the same thing (advance + play) in one call and records the
+skip in autoplay history. When the queue is empty, `engine.next()` hands over to
+autoplay automatically — see below.
 
 ## Fetch synced lyrics
 
@@ -178,4 +180,32 @@ val job = launch {
 ```
 
 `currentSong` is a `StateFlow<Song?>`; it's set when a song starts and cleared on
-`SongEnded`.
+natural end (`SongEnded`) or `stop()`.
+
+## Enable autoplay
+
+Register a `RecommendationProvider` — a source of candidate follow-up tracks:
+
+```kotlin
+class MyRecommender : RecommendationProvider {
+    override val name = "my-recommender"
+    override suspend fun recommend(context: AutoplayContext, limit: Int): List<Song> {
+        // context.currentSong / recentSongs / recentArtists / recentGenres /
+        // queueSongs / repeatMode / shuffleEnabled — use them to pick follow-ups.
+        return similarTracks(context.currentSong).take(limit)
+    }
+}
+
+val jusPlayer = createJusPlayer {
+    provider(NewPipeProvider())
+    recommendationProvider(MyRecommender())   // autoplay on by default once registered
+    autoplay(AutoplayConfig(bufferSize = 5))  // optional tuning
+    autoplayEnabled(true)
+    player(MyPlayerAdapter())
+}
+```
+
+When the queue runs out (natural `SongEnded` under `RepeatMode.NONE`), the engine
+scores, diversifies, enqueues, and starts the follow-ups automatically. The latest
+candidates are visible on `engine.autoplayCandidates`, and a
+`AutoplayEnqueued(songs)` event fires when they land in the queue.

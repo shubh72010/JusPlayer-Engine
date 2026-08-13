@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JusPlayer — Web Player</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d2130; --border: #2a2e3a;
+    --text: #e6e8ee; --muted: #9aa0b0; --accent: #4c8dff; --ok: #3ddc84; --err: #ff5f5f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 14px 24px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .spacer { flex: 1; }
+  .status { font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .status.play { color: var(--ok); }
+  .status.err { color: var(--err); }
+
+  .layout { display: grid; grid-template-columns: 1fr 340px; gap: 18px;
+            max-width: 1200px; margin: 18px auto; padding: 0 18px; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+
+  /* Now playing */
+  .now-playing { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px; display: flex; gap: 16px; align-items: center; }
+  .cover { width: 96px; height: 96px; border-radius: 8px; background: var(--panel2);
+           display: flex; align-items: center; justify-content: center; font-size: 38px;
+           overflow: hidden; flex: 0 0 96px; }
+  .cover img { width: 100%; height: 100%; object-fit: cover; }
+  .np-info { min-width: 0; flex: 1; }
+  .np-title { font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { color: var(--muted); font-size: 14px; margin-top: 2px;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-meta { color: var(--muted); font-size: 12px; margin-top: 4px; font-family: var(--mono); }
+  .controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .controls button { background: var(--accent); color: #fff; border: 0; border-radius: 50%;
+    width: 44px; height: 44px; font-size: 18px; cursor: pointer; }
+  .controls button:hover { filter: brightness(1.1); }
+  .controls button.secondary { background: var(--panel2); border: 1px solid var(--border); }
+  .controls button:disabled { opacity: .4; cursor: not-allowed; }
+  .time { font-size: 12px; font-family: var(--mono); color: var(--muted); min-width: 92px; }
+  .seek { flex: 1; accent-color: var(--accent); min-width: 120px; }
+  .volume { accent-color: var(--accent); width: 90px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+              color: var(--muted); margin: 0 0 10px; }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: 13px var(--mono); }
+  .row input:focus { outline: 2px solid var(--accent); }
+  .btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px;
+    font-size: 13px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.sec { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .list { display: flex; flex-direction: column; }
+  .item { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 8px;
+          cursor: pointer; }
+  .item:hover { background: var(--panel2); }
+  .item.playing { background: var(--panel2); outline: 1px solid var(--accent); }
+  .item .thumb { width: 44px; height: 44px; border-radius: 6px; background: var(--panel2);
+                 flex: 0 0 44px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .item .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .item .t { min-width: 0; flex: 1; }
+  .item .t .title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .t .artist { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .dur { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+  .item .x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 4px; }
+  .item .x:hover { color: var(--err); }
+  .scroll { max-height: 420px; overflow: auto; }
+  .empty { color: var(--muted); font-style: italic; padding: 12px 4px; }
+  .error { color: var(--err); font-size: 13px; padding: 8px 4px; }
+  pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+        overflow: auto; font: 12px/1.5 var(--mono); color: #d8dbe3; white-space: pre-wrap; word-break: break-word; }
+  .queue-count { color: var(--muted); font-size: 12px; }
+  .badge { font-size: 11px; border: 1px solid var(--border); border-radius: 999px;
+           padding: 2px 8px; color: var(--muted); }
+  .badge.on { color: var(--ok); border-color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>JusPlayer</h1>
+  <span class="spacer"></span>
+  <span id="state" class="status">idle</span>
+  <span class="status">api · <span id="apiHost">localhost:8368</span></span>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="now-playing">
+      <div class="cover" id="cover">♪</div>
+      <div class="np-info">
+        <div class="np-title" id="npTitle">Nothing playing</div>
+        <div class="np-artist" id="npArtist">—</div>
+        <div class="np-meta" id="npMeta"></div>
+        <div class="controls">
+          <button class="secondary" id="prevBtn" title="Previous">⏮</button>
+          <button id="playBtn" title="Play/Pause">▶</button>
+          <button class="secondary" id="nextBtn" title="Next">⏭</button>
+          <button class="secondary" id="repeatBtn" title="Repeat mode">🔁</button>
+          <span class="time"><span id="curTime">0:00</span> / <span id="totTime">0:00</span></span>
+          <input class="seek" id="seek" type="range" min="0" max="1000" value="0">
+          <input class="volume" id="volume" type="range" min="0" max="1" step="0.01" value="0.8">
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Search</h2>
+      <div class="row">
+        <input id="query" type="text" placeholder="Artist / track…" value="Daft Punk">
+        <button class="btn" id="searchBtn">Search</button>
+      </div>
+      <div id="results" class="list scroll" style="margin-top:10px"><div class="empty">Search for music to play.</div></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Queue <span class="queue-count" id="queueCount"></span></h2>
+      <div id="queue" class="list scroll"><div class="empty">Empty.</div></div>
+      <div style="margin-top:10px" class="row">
+        <button class="btn sec" id="clearQBtn">Clear</button>
+        <button class="btn sec" id="shuffleBtn">Shuffle: off</button>
+        <button class="btn sec" id="autoplayBtn" title="Engine autoplay on queue end">Autoplay: on</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Song detail</h2>
+      <pre id="detail" class="empty">Nothing playing yet.</pre>
+    </div>
+  </div>
+</div>
+
+<audio id="audio"></audio>
+
+<script>
+const BASE = 'http://localhost:8368';
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
+
+const audio = $('audio');
+audio.volume = 0.8;
+
+let state = { state: 'Idle', currentSong: null, queue: [], currentIndex: -1,
+              repeatMode: 'NONE', shuffleEnabled: false, autoplayEnabled: true, autoplayCandidates: [] };
+let loadedSongId = null;
+
+function fmt(ms) {
+  if (!isFinite(ms) || ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+function thumb(song) { return song.thumbnailUrl; }
+function artistStr(song) { return (song.artists || []).map(a => a.name).join(', ') || 'unknown'; }
+
+async function fetchJSON(path) {
+  const res = await fetch(BASE + path);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+  return res.json();
+}
+async function post(path) {
+  const res = await fetch(BASE + path, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+  return res.json();
+}
+
+function setStatus(s, cls) {
+  $('state').textContent = s;
+  $('state').className = 'status' + (cls ? ' ' + cls : '');
+  $('playBtn').textContent = (s === 'playing' || audio.paused === false) ? '⏸' : '▶';
+}
+
+function renderControls() {
+  $('repeatBtn').textContent = state.repeatMode === 'ONE' ? '🔂' : '🔁';
+  $('shuffleBtn').textContent = 'Shuffle: ' + (state.shuffleEnabled ? 'on' : 'off');
+  $('autoplayBtn').textContent = 'Autoplay: ' + (state.autoplayEnabled ? 'on' : 'off');
+  $('autoplayBtn').classList.toggle('on', state.autoplayEnabled);
+}
+
+function renderQueue() {
+  const box = $('queue');
+  box.innerHTML = '';
+  const queue = state.queue || [];
+  $('queueCount').textContent = queue.length ? `· ${queue.length}` : '';
+  if (!queue.length) { box.append(el('div', 'empty', 'Empty.')); return; }
+  queue.forEach((song, i) => {
+    const item = el('div', 'item' + (i === state.currentIndex ? ' playing' : ''));
+    const th = el('div', 'thumb'); th.append(thumb(song) ? Object.assign(el('img'), { src: thumb(song) }) : '♪');
+    const t = el('div', 't');
+    t.append(el('div', 'title', song.title || '(untitled)'));
+    t.append(el('div', 'artist', artistStr(song)));
+    item.append(th, t);
+    item.append(el('span', 'dur', fmt(song.duration)));
+    const x = el('button', 'x', '✕');
+    x.onclick = e => { e.stopPropagation(); post(`/v1/player/queue/remove/${i}`); };
+    item.append(x);
+    item.onclick = () => post('/v1/player/play/' + encodeURIComponent(song.id));
+    box.append(item);
+  });
+}
+
+function renderResults(data) {
+  const box = $('results');
+  box.innerHTML = '';
+  const songs = data.songs || [];
+  if (!songs.length) { box.append(el('div', 'empty', 'No songs found.')); return; }
+  songs.forEach(song => {
+    const item = el('div', 'item');
+    const th = el('div', 'thumb'); th.append(thumb(song) ? Object.assign(el('img'), { src: thumb(song) }) : '♪');
+    const t = el('div', 't');
+    t.append(el('div', 'title', song.title || '(untitled)'));
+    t.append(el('div', 'artist', artistStr(song)));
+    item.append(th, t);
+    item.append(el('span', 'dur', fmt(song.duration)));
+    const plus = el('button', 'x', '＋');
+    plus.title = 'Add to queue';
+    plus.onclick = e => { e.stopPropagation(); post('/v1/player/queue/add/' + encodeURIComponent(song.id)); };
+    item.append(plus);
+    item.onclick = () => post('/v1/player/play/' + encodeURIComponent(song.id));
+    box.append(item);
+  });
+}
+
+function showNowPlaying(song) {
+  $('npTitle').textContent = song.title || '(untitled)';
+  $('npArtist').textContent = artistStr(song);
+  const cover = $('cover');
+  cover.innerHTML = '';
+  cover.append(thumb(song) ? Object.assign(el('img'), { src: thumb(song) }) : '♪');
+  $('npMeta').textContent = `${song.id}`;
+  $('detail').classList.remove('empty');
+  $('detail').textContent = JSON.stringify(song, null, 2);
+}
+
+/** Loads and plays the stream for [song]; returns early if superseded meanwhile. */
+async function loadAndPlay(song) {
+  loadedSongId = song.id;
+  setStatus('buffering');
+  showNowPlaying(song);
+  try {
+    const stream = await fetchJSON('/v1/stream/' + encodeURIComponent(song.id));
+    if (loadedSongId !== song.id) return;
+    audio.src = stream.url;
+    await audio.play();
+    setStatus('playing', 'play');
+  } catch (e) {
+    if (loadedSongId === song.id) setStatus('error', 'err');
+  }
+}
+
+/** Polls the engine's authoritative state and reacts to transitions. */
+async function tick() {
+  try {
+    const next = await fetchJSON('/v1/player/state');
+    const changed =
+      next.state !== state.state ||
+      (next.currentSong || {}).id !== (state.currentSong || {}).id ||
+      JSON.stringify(next.queue || []) !== JSON.stringify(state.queue || []) ||
+      next.repeatMode !== state.repeatMode ||
+      next.shuffleEnabled !== state.shuffleEnabled ||
+      next.autoplayEnabled !== state.autoplayEnabled;
+    state = next;
+    if (changed) {
+      renderControls();
+      renderQueue();
+    }
+    const cur = state.currentSong;
+    if (cur && cur.id !== loadedSongId) {
+      await loadAndPlay(cur);
+    } else if (!cur) {
+      if (loadedSongId !== null) {
+        loadedSongId = null;
+        audio.pause();
+        audio.removeAttribute('src');
+        $('npTitle').textContent = 'Nothing playing';
+        $('npArtist').textContent = '—';
+        $('npMeta').textContent = '';
+        $('cover').innerHTML = '♪';
+        $('detail').className = 'empty';
+        $('detail').textContent = 'Nothing playing yet.';
+      }
+      setStatus(state.state.toLowerCase());
+    }
+  } catch (e) {
+    setStatus('offline', 'err');
+  }
+}
+
+$('searchBtn').onclick = async () => {
+  const q = $('query').value.trim();
+  if (!q) return;
+  try { renderResults(await fetchJSON('/v1/search?q=' + encodeURIComponent(q))); }
+  catch (e) { $('results').innerHTML = ''; $('results').append(el('div', 'error', 'Search failed: ' + e.message)); }
+};
+$('query').addEventListener('keydown', e => { if (e.key === 'Enter') $('searchBtn').click(); });
+
+$('playBtn').onclick = () => {
+  if (!audio.src) return;
+  if (audio.paused) audio.play().then(() => setStatus('playing', 'play')).catch(() => setStatus('error', 'err'));
+  else audio.pause();
+};
+$('prevBtn').onclick = () => post('/v1/player/previous');
+$('nextBtn').onclick = () => post('/v1/player/next');
+$('clearQBtn').onclick = () => post('/v1/player/queue/clear');
+$('shuffleBtn').onclick = () => post('/v1/player/shuffle?enabled=' + !state.shuffleEnabled);
+$('autoplayBtn').onclick = () => post('/v1/player/autoplay?enabled=' + !state.autoplayEnabled);
+$('repeatBtn').onclick = () => {
+  const order = ['NONE', 'ALL', 'ONE'];
+  const nextMode = order[(order.indexOf(state.repeatMode) + 1) % order.length];
+  post('/v1/player/repeat?mode=' + nextMode);
+};
+
+audio.addEventListener('timeupdate', () => {
+  $('curTime').textContent = fmt(audio.currentTime * 1000);
+  if (isFinite(audio.duration) && audio.duration) $('seek').value = Math.round(audio.currentTime / audio.duration * 1000);
+});
+audio.addEventListener('loadedmetadata', () => $('totTime').textContent = fmt(audio.duration * 1000));
+
+// Natural end in the browser -> tell the engine; it advances the queue and
+// autoplays when exhausted. The poll then picks up the new current song.
+audio.addEventListener('ended', () => {
+  post('/v1/player/song-ended?ms=' + Math.round(audio.currentTime * 1000)).catch(() => {});
+});
+audio.addEventListener('play', () => setStatus('playing', 'play'));
+audio.addEventListener('pause', () => { if (audio.currentTime === 0 || audio.ended) return; setStatus('paused'); });
+audio.addEventListener('error', () => setStatus('error', 'err'));
+
+$('seek').addEventListener('input', () => {
+  if (isFinite(audio.duration) && audio.duration) audio.currentTime = audio.duration * ($('seek').value / 1000);
+});
+$('volume').addEventListener('input', () => audio.volume = parseFloat($('volume').value));
+
+renderControls();
+renderQueue();
+setInterval(tick, 600);
+tick();
+</script>
+</body>
+</html>

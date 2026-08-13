@@ -22,6 +22,7 @@ include(
     "engine-provider-newpipe",
     "engine-provider-lrclib",
     "engine-provider-coverartarchive",
+    "engine-autoplay",
     "engine-utils",
     "engine-http",
     "sample-console",

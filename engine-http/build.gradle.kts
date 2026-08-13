@@ -11,6 +11,9 @@ application {
 dependencies {
     implementation(project(":engine-core"))
     implementation(project(":engine-api"))
+    implementation(project(":engine-autoplay"))
+    implementation(project(":engine-queue"))
+    implementation(project(":engine-events"))
     implementation(project(":engine-model"))
     implementation(project(":engine-provider-api"))
     implementation(project(":engine-playback-api"))

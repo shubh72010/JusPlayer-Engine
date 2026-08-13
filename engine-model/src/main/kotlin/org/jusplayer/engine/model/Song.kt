@@ -11,6 +11,7 @@ data class Song(
     val duration: Long,
     val thumbnailUrl: String?,
     val streamUrl: String?,
+    val genres: List<String> = emptyList(),
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -101,3 +102,9 @@ data class QueueItem(
     val song: Song,
     val addedAt: Long = System.currentTimeMillis(),
 )
+
+enum class RepeatMode {
+    NONE,
+    ONE,
+    ALL,
+}

@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":engine-provider-api"))
     implementation(project(":engine-playback-api"))
     implementation(project(":engine-queue"))
+    implementation(project(":engine-autoplay"))
     implementation(project(":engine-utils"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     testImplementation(kotlin("test"))
