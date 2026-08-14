@@ -11,6 +11,10 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.time.Duration
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.awt.Desktop
 import java.net.URI
@@ -62,6 +66,10 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
         autoplay(AutoplayConfig(bufferSize = 5, maxConsecutiveSameArtist = 2))
         autoplayEnabled(true)
     }
+
+    // Background work (e.g. topping up the queue after a play) so endpoints
+    // respond fast while the engine does the recommendation fetch.
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     fun start(openBrowser: Boolean = true) {
         embeddedServer(Netty, port = port) {
             environment.monitor.subscribe(ApplicationStarted) {
@@ -197,6 +205,9 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                     runCatching {
                         val song = provider.getSong(id)
                         player.engine.play(song)
+                        // Build the queue automatically: top up with autoplay
+                        // recommendations behind the song the user just picked.
+                        engineScope.launch { runCatching { player.engine.enqueueAutoplay(song) } }
                         call.respond(mapOf("ok" to true))
                     }.getOrElse {
                         call.respond(mapOf("error" to (it.message ?: "unknown")))
@@ -219,6 +230,10 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 }
                 post("/v1/player/stop") {
                     player.engine.stop()
+                    call.respond(mapOf("ok" to true))
+                }
+                post("/v1/player/resume") {
+                    player.engine.resume()
                     call.respond(mapOf("ok" to true))
                 }
 
@@ -277,6 +292,48 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                     call.respond(mapOf("ok" to true))
                 }
 
+                post("/v1/player/queue/add-next/{id}") {
+                    val id = call.parameters["id"] ?: ""
+                    runCatching {
+                        val song = provider.getSong(id)
+                        player.queue.addNext(song)
+                        call.respond(mapOf("ok" to true))
+                    }.getOrElse {
+                        call.respond(mapOf("error" to (it.message ?: "unknown")))
+                    }
+                }
+
+                // Points the queue cursor at [index] and plays that track via the
+                // engine (adds nothing, so a stray id can't grow the queue).
+                post("/v1/player/queue/jump/{index}") {
+                    val index = call.parameters["index"]?.toIntOrNull()
+                    if (index == null) {
+                        call.respond(mapOf("error" to "missing index"))
+                        return@post
+                    }
+                    runCatching {
+                        if (player.queue.jumpTo(index) == null) {
+                            call.respond(mapOf("error" to "index out of range"))
+                        } else {
+                            player.engine.play()
+                            call.respond(mapOf("ok" to true))
+                        }
+                    }.getOrElse {
+                        call.respond(mapOf("error" to (it.message ?: "unknown")))
+                    }
+                }
+
+                post("/v1/player/queue/move") {
+                    val from = call.request.queryParameters["from"]?.toIntOrNull()
+                    val to = call.request.queryParameters["to"]?.toIntOrNull()
+                    if (from != null && to != null) {
+                        player.queue.move(from, to)
+                        call.respond(mapOf("ok" to true))
+                    } else {
+                        call.respond(mapOf("error" to "missing from/to"))
+                    }
+                }
+
                 post("/v1/player/repeat") {
                     val mode = call.request.queryParameters["mode"]
                     val parsed = mode?.let { runCatching { RepeatMode.valueOf(it) }.getOrNull() }
@@ -326,6 +383,8 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
             shuffleEnabled = snapshot.shuffleEnabled,
             autoplayEnabled = player.engine.autoplayEnabled.value,
             autoplayCandidates = player.engine.autoplayCandidates.value,
+            hasNext = snapshot.hasNext,
+            hasPrevious = snapshot.hasPrevious,
             generation = player.engine.currentPlayback.value?.generation,
         )
     }
@@ -449,6 +508,8 @@ data class PlayerStateResponse(
     val shuffleEnabled: Boolean,
     val autoplayEnabled: Boolean,
     val autoplayCandidates: List<JpSong>,
+    val hasNext: Boolean,
+    val hasPrevious: Boolean,
     val generation: Long? = null,
 )
 

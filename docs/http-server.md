@@ -29,19 +29,28 @@ The server wires `NewPipeProvider` + `LRCLIBProvider` +
 ## In-built browser demo
 
 Pointing a browser at `http://localhost:8368/` (auto-opened on start) loads a
-self-contained **single-file HTML/JS demo** (`engine-http/src/main/resources/index.html`)
-with three views:
-
-- **Player** — search songs; clicking a result loads the stream into an `<audio>`
-  element, plus cover art and lyrics, with a live playback readout.
-- **Details** — per-category metadata tables for the song, stream, artwork, and
-  lyrics (album, upload date, provider URL, codec/MIME/bitrate, artwork source and
-  dimensions, lyrics source/sync).
-- **Developer** — registered providers and their capabilities, the playback-state
-  readout, and pretty-printed raw JSON for every response. Great for debugging
-  providers.
-
+self-contained **single-file HTML/JS demo** (`engine-http/src/main/resources/index.html`).
 No build step or Node/JS toolchain is involved.
+
+The demo is **fully engine-driven**: it owns no playback state of its own. It
+polls `GET /v1/player/state` as its source of truth and drives every feature
+through the engine's HTTP API:
+
+- **Now playing** — cover art, title, artist, album, and transport controls
+  (play/pause, previous, next, seek, volume). Play/pause, skip, repeat, shuffle,
+  and autoplay all route through the engine; the queue belongs to the engine.
+- **Search** — every result can be played now, played next (`queue/add-next`),
+  or appended to the queue (`queue/add`).
+- **Queue** — a live, engine-owned queue with play-now, remove, clear, shuffle,
+  repeat, autoplay toggle, and drag-and-drop reordering (`queue/move`). "Up next"
+  shows the tracks actually queued ahead of the cursor.
+- **Lyrics / Details / Developer** — synced/plain lyrics, per-category metadata
+  tables, provider diagnostics, and raw JSON for every response.
+
+Because the browser owns the `<audio>` element, the client resolves the stream,
+plays it, and reports the natural end back to the engine via `song-ended` so the
+engine can auto-advance (and replenish via autoplay) exactly as it would for any
+other adapter.
 
 ## Endpoints
 
@@ -58,16 +67,20 @@ All responses are JSON. Errors return `{"error": "message"}`.
 | GET | `/v1/artwork/{id}` | Cover art for a song id |
 | GET | `/v1/recommendations/{id}?limit=` | Platform-native (YouTube related) recommendations |
 | GET | `/v1/player/state` | Playback state: state, current song, queue, repeat, shuffle, autoplay, generation |
-| POST | `/v1/player/play/{id}` | Queue + play a song through the engine |
+| POST | `/v1/player/play/{id}` | Queue + play a song; auto-builds the queue with autoplay recommendations behind it |
 | POST | `/v1/player/next` | Advance to the next track |
 | POST | `/v1/player/previous` | Go back one (restarts current >3s in) |
 | POST | `/v1/player/pause` | Pause |
 | POST | `/v1/player/stop` | Stop |
+| POST | `/v1/player/resume` | Resume the paused song (new session) |
 | POST | `/v1/player/seek?ms=` | Seek to a position |
 | POST | `/v1/player/song-ended?ms=&song=&generation=` | Report a natural end (triggers auto-advance/autoplay) |
 | POST | `/v1/player/queue/add/{id}` | Add a song to the queue |
+| POST | `/v1/player/queue/add-next/{id}` | Insert a song right after the current track ("play next") |
 | POST | `/v1/player/queue/remove/{index}` | Remove by queue index |
 | POST | `/v1/player/queue/clear` | Clear the queue |
+| POST | `/v1/player/queue/jump/{index}` | Point the cursor at a queue index and play it |
+| POST | `/v1/player/queue/move?from=&to=` | Reorder the queue (cursor stays aligned) |
 | POST | `/v1/player/repeat?mode=NONE\|ONE\|ALL` | Set repeat mode |
 | POST | `/v1/player/shuffle?enabled=` | Toggle shuffle |
 | POST | `/v1/player/autoplay?enabled=` | Toggle autoplay |
@@ -106,13 +119,16 @@ rejected instead of advancing/restarting playback out of order. A request whose
   "shuffleEnabled": false,
   "autoplayEnabled": true,
   "autoplayCandidates": [],
+  "hasNext": false,
+  "hasPrevious": false,
   "generation": 7
 }
 ```
 
 `generation` identifies the active playback session (see above). It is `null`
 when idle/paused/stopped. Poll it alongside `state`/`currentSong` so the UI can
-send the correct value on `song-ended`.
+send the correct value on `song-ended`. `hasNext`/`hasPrevious` come straight
+from the queue snapshot (respecting repeat/shuffle) and drive UI affordances.
 
 ### `GET /health`
 

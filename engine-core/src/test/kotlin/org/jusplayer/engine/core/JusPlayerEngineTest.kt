@@ -286,6 +286,74 @@ class JusPlayerEngineTest {
     }
 
     @Test
+    fun enqueueAutoplayTopsUpQueueWithoutAdvancing() = runBlocking {
+        queue.add(song("1"))
+        build()
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        val added = engine.enqueueAutoplay(song("1"))
+
+        assertEquals(3, added)
+        // The cursor and playback are untouched — nothing new started.
+        assertEquals(song("1"), engine.currentSong.value)
+        assertEquals(listOf("1"), started.map { it.id })
+        // Recommendations land behind the current track.
+        assertEquals(listOf("1", "auto-1", "auto-2", "auto-3"), engine.queue.items.map { it.id })
+        assertEquals(setOf("auto-1", "auto-2", "auto-3"), engine.autoplayCandidates.value.map { it.id }.toSet())
+        assertEquals(setOf("auto-1", "auto-2", "auto-3"), autoplayEnqueued.single().songs.map { it.id }.toSet())
+    }
+
+    @Test
+    fun enqueueAutoplaySkipsWhenEnoughAlreadyQueued() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2"), song("3"), song("4")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        // minRemaining = 3 and there are exactly 3 ahead → no top-up.
+        val added = engine.enqueueAutoplay(song("1"))
+
+        assertEquals(0, added)
+        assertEquals(listOf("1", "2", "3", "4"), engine.queue.items.map { it.id })
+        assertTrue(autoplayEnqueued.isEmpty())
+    }
+
+    @Test
+    fun enqueueAutoplaySkipsWhenDisabled() = runBlocking {
+        queue.add(song("1"))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        val added = engine.enqueueAutoplay(song("1"))
+
+        assertEquals(0, added)
+        assertEquals(listOf("1"), engine.queue.items.map { it.id })
+        assertTrue(autoplayEnqueued.isEmpty())
+    }
+
+    @Test
+    fun enqueueAutoplaySkipsWhenSongIsNoLongerCurrent() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        // Recommendations are computed for "2", but the engine is still on "1":
+        // the stale batch must not be appended to the queue.
+        val added = engine.enqueueAutoplay(song("2"))
+
+        assertEquals(0, added)
+        assertEquals(listOf("1", "2"), engine.queue.items.map { it.id })
+        assertTrue(autoplayEnqueued.isEmpty())
+    }
+
+    @Test
     fun autoplayRespectsRepeatAll() = runBlocking {
         queue.addAll(listOf(song("1"), song("2")))
         queue.setRepeatMode(org.jusplayer.engine.model.RepeatMode.ALL)

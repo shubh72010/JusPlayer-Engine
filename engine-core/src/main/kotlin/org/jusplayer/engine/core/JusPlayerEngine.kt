@@ -327,6 +327,44 @@ class JusPlayerEngine(
         _autoplayEnabled.value = enabled
     }
 
+    /**
+     * Proactively tops up the queue with autoplay recommendations for [song],
+     * so playback always has tracks queued ahead — e.g. right after a user picks
+     * a song from search. Recommendations are appended to the tail without moving
+     * the cursor or starting playback. No-op when autoplay is disabled, no
+     * recommendation provider is registered, [song] is no longer current, or the
+     * queue already has at least [minRemaining] tracks ahead of the cursor.
+     * Returns the number of tracks enqueued.
+     */
+    suspend fun enqueueAutoplay(song: Song, minRemaining: Int = 3): Int {
+        val engine = autoplayEngine ?: return 0
+        if (!_autoplayEnabled.value) return 0
+        val remaining = queueEngine.items.size - queueEngine.currentIndexValue - 1
+        if (remaining >= minRemaining) return 0
+        val candidates = try {
+            withContext(Dispatchers.IO) {
+                withTimeout(config.autoplayTimeoutMs) { engine.recommend(autoplayContext(song)) }
+            }
+        } catch (e: TimeoutCancellationException) {
+            emptyList()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val fresh = candidates.filter { it.id != song.id }.distinctBy { it.id }
+        if (fresh.isEmpty()) return 0
+        return transitionMutex.withLock {
+            if (_currentSong.value?.id != song.id) 0
+            else {
+                _autoplayCandidates.value = fresh
+                queueEngine.addAll(fresh)
+                eventBus.tryEmit(AutoplayEnqueued(fresh))
+                fresh.size
+            }
+        }
+    }
+
     val queue: QueueEngine = queueEngine
 
     fun setProviderRegistry(registry: ProviderRegistry) {
