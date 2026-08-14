@@ -55,12 +55,17 @@ class JusPlayerEngineTest {
     private fun build(
         autoplayEnabled: Boolean = true,
         provider: RecommendationProvider? = FakeRecommendationProvider(),
+        musicProvider: MusicProvider = StubProvider(),
+        streamTimeoutMs: Long = 15_000,
+        autoplayTimeoutMs: Long = 15_000,
     ): JusPlayerEngine {
         val config = JusPlayerConfig(
-            provider = StubProvider(),
+            provider = musicProvider,
             recommendationProviders = if (provider != null) listOf(provider) else emptyList(),
             autoplayConfig = AutoplayConfig(bufferSize = 3),
             autoplayEnabled = autoplayEnabled,
+            streamTimeoutMs = streamTimeoutMs,
+            autoplayTimeoutMs = autoplayTimeoutMs,
         )
         engine = JusPlayerEngine(config, eventBus, queue, adapter)
         // Subscribe a test-side capture on the same flow BEFORE any test action,
@@ -382,6 +387,326 @@ class JusPlayerEngineTest {
         assertEquals(2, engine.queue.size)
     }
 
+    // ── Session tokens: stale/duplicate completions ──
+
+    @Test
+    fun duplicateCompletionForSameGenerationIsIgnored() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+        val generation = engine.currentPlayback.value!!.generation
+
+        eventBus.emit(SongEnded(song("1"), 100_000, generation = generation))
+        await { started.any { it.id == "2" } }
+
+        eventBus.emit(SongEnded(song("1"), 100_000, generation = generation))
+        delay(50)
+
+        assertEquals(listOf("1", "2"), started.map { it.id })
+        assertEquals(song("2"), engine.currentSong.value)
+    }
+
+    @Test
+    fun staleCompletionFromPreviousTrackAfterSkipIsIgnored() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+        val firstGeneration = engine.currentPlayback.value!!.generation
+
+        engine.next()
+        await { started.any { it.id == "2" } }
+
+        // A late natural-end from the first session must not advance again.
+        eventBus.emit(SongEnded(song("1"), 100_000, generation = firstGeneration))
+        delay(50)
+
+        assertEquals(song("2"), engine.currentSong.value)
+        assertEquals(listOf("1", "2"), started.map { it.id })
+    }
+
+    @Test
+    fun sameSongReplayedRejectsCompletionFromOldSession() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+        val firstGeneration = engine.currentPlayback.value!!.generation
+
+        // Replaying the same song is a brand-new session with a new generation.
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+        val secondGeneration = engine.currentPlayback.value!!.generation
+        assertTrue(secondGeneration > firstGeneration)
+
+        // The old session's completion must not count against the new session.
+        eventBus.emit(SongEnded(song("1"), 100_000, generation = firstGeneration))
+        delay(50)
+
+        assertEquals(song("1"), engine.currentSong.value)
+        assertEquals(listOf("1", "1"), started.map { it.id })
+    }
+
+    @Test
+    fun completionAfterStopIsIgnored() = runBlocking {
+        queue.add(song("1"))
+        build()
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        engine.stop()
+        await { stopped.isNotEmpty() }
+
+        eventBus.emit(SongEnded(song("1"), 100_000))
+        delay(50)
+
+        assertEquals(PlaybackState.Idle, engine.state.value)
+        assertNull(engine.currentSong.value)
+        assertEquals(listOf("1"), started.map { it.id })
+        assertTrue(autoplayEnqueued.isEmpty())
+    }
+
+    @Test
+    fun completionWithMatchingGenerationButWrongSongIsIgnored() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+        val generation = engine.currentPlayback.value!!.generation
+
+        // Forging the active generation while naming a different song must not
+        // advance playback: the generation only identifies the *session*, the
+        // song must still match the one actually playing.
+        eventBus.emit(SongEnded(song("2"), 100_000, generation = generation))
+        delay(50)
+
+        assertEquals(song("1"), engine.currentSong.value)
+        assertEquals(listOf("1"), started.map { it.id })
+    }
+
+    // ── Resume after pause races ──
+
+    @Test
+    fun resumeAfterPauseDuringPendingAdvanceDoesNotReplayStaleStream() = runBlocking {
+        val gated = GatedProvider()
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        gated.release("1")
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        // Song 1 ends naturally; the auto-advance to song 2 is still resolving
+        // (gated) when the user pauses, then resumes before it commits.
+        eventBus.emit(SongEnded(song("1"), 100_000))
+        await { engine.state.value == PlaybackState.Buffering && engine.currentSong.value?.id == "2" }
+
+        engine.pause()
+        assertEquals(PlaybackState.Paused, engine.state.value)
+        val resumeJob = launch { engine.resume() }
+        await { engine.state.value == PlaybackState.Buffering }
+
+        gated.release("2")
+        awaitState(PlaybackState.Playing)
+        resumeJob.join()
+
+        // The adapter must never be told to play song 1's stale stream for song 2.
+        assertEquals("stream://2", adapter.playedUrls.last())
+        assertEquals(song("2"), engine.currentSong.value)
+    }
+
+    @Test
+    fun resumeAfterPauseDuringBufferingReResolvesStream() = runBlocking {
+        val gated = GatedProvider()
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        val job = launch { engine.play(song("1")) }
+        await { engine.state.value == PlaybackState.Buffering }
+
+        // Pausing a track that is still buffering must not poison resume: the
+        // cached stream does not exist yet, so resume re-resolves instead of
+        // failing the session.
+        engine.pause()
+        assertEquals(PlaybackState.Paused, engine.state.value)
+        val resumeJob = launch { engine.resume() }
+        await { engine.state.value == PlaybackState.Buffering }
+
+        gated.release("1")
+        awaitState(PlaybackState.Playing)
+        resumeJob.join()
+        job.join()
+
+        assertEquals(song("1"), engine.currentSong.value)
+        assertEquals("stream://1", adapter.playedUrls.last())
+    }
+
+    @Test
+    fun queueMutationDuringPlaybackAlignsCursor() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2"), song("3")))
+        build(autoplayEnabled = false)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Playing)
+
+        // The user removes the currently-playing track from the queue. The
+        // engine must play whatever the cursor now points at instead of
+        // skipping it with a naive next().
+        queue.remove(0)
+        assertEquals(song("2"), engine.queue.currentSong)
+
+        eventBus.emit(SongEnded(song("1"), 100_000))
+        await { started.any { it.id == "2" } }
+
+        assertEquals("2", engine.currentSong.value?.id)
+        assertEquals(listOf("1", "2"), started.map { it.id })
+        assertEquals(listOf("2", "3"), engine.queue.items.map { it.id })
+    }
+
+    // ── Session tokens: late stream resolution / loading races ──
+
+    @Test
+    fun staleStreamResolutionCannotOverwriteNewerIntent() = runBlocking {
+        val gated = GatedProvider()
+        queue.addAll(listOf(song("1"), song("2")))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        val job1 = launch { engine.play(song("1")) }
+        await { engine.currentPlayback.value?.songId == "1" }
+        val job2 = launch { engine.play(song("2")) }
+        await { engine.currentPlayback.value?.songId == "2" }
+
+        // Song 1 resolves late — after song 2 took over — and must NOT start.
+        gated.release("1")
+        job1.join()
+        assertTrue(started.none { it.id == "1" }, "stale song 1 started: ${started.map { it.id }}")
+
+        gated.release("2")
+        job2.join()
+
+        assertEquals("2", engine.currentSong.value?.id)
+        assertEquals(listOf("2"), started.map { it.id })
+    }
+
+    @Test
+    fun pauseDuringLoadingRejectsLateResolution() = runBlocking {
+        val gated = GatedProvider()
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        val job = launch { engine.play(song("1")) }
+        await { engine.currentPlayback.value?.songId == "1" }
+
+        engine.pause()
+        assertEquals(PlaybackState.Paused, engine.state.value)
+
+        gated.release("1")
+        job.join()
+
+        assertEquals(PlaybackState.Paused, engine.state.value)
+        assertTrue(started.isEmpty())
+    }
+
+    @Test
+    fun stopDuringLoadingRejectsLateResolution() = runBlocking {
+        val gated = GatedProvider()
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        val job = launch { engine.play(song("1")) }
+        await { engine.currentPlayback.value?.songId == "1" }
+
+        engine.stop()
+        assertEquals(PlaybackState.Idle, engine.state.value)
+
+        gated.release("1")
+        job.join()
+
+        assertEquals(PlaybackState.Idle, engine.state.value)
+        assertNull(engine.currentSong.value)
+        assertTrue(started.isEmpty())
+    }
+
+    @Test
+    fun callerCancellationDuringLoadingClearsSession() = runBlocking {
+        val gated = GatedProvider()
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        val job = launch { engine.play(song("1")) }
+        await { engine.currentPlayback.value?.songId == "1" }
+
+        job.cancel()
+        job.join()
+
+        assertEquals(PlaybackState.Idle, engine.state.value)
+        assertNull(engine.currentSong.value)
+        assertTrue(started.isEmpty())
+    }
+
+    @Test
+    fun shutdownDuringLoadingClearsSession() = runBlocking {
+        val gated = GatedProvider()
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = gated)
+
+        val job = launch { engine.play(song("1")) }
+        await { engine.currentPlayback.value?.songId == "1" }
+
+        engine.close()
+        gated.release("1")
+        job.join()
+
+        assertEquals(PlaybackState.Idle, engine.state.value)
+        assertNull(engine.currentSong.value)
+    }
+
+    // ── Stream resolution failures ──
+
+    @Test
+    fun streamResolutionTimeoutFailsPlayback() = runBlocking {
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = SlowProvider(), streamTimeoutMs = 200)
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Error)
+
+        assertNull(engine.currentSong.value)
+    }
+
+    @Test
+    fun streamResolutionFailureReportsError() = runBlocking {
+        queue.add(song("1"))
+        build(autoplayEnabled = false, musicProvider = SelectiveFailingProvider("1"))
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Error)
+
+        assertNull(engine.currentSong.value)
+        assertEquals(PlaybackState.Error, engine.state.value)
+    }
+
+    @Test
+    fun nextEscapesBrokenTrackUnderRepeatOne() = runBlocking {
+        queue.addAll(listOf(song("1"), song("2")))
+        queue.setRepeatMode(RepeatMode.ONE)
+        build(autoplayEnabled = false, musicProvider = SelectiveFailingProvider("1"))
+
+        engine.play(song("1"))
+        awaitState(PlaybackState.Error)
+
+        engine.next()
+        awaitState(PlaybackState.Playing)
+
+        assertEquals("2", engine.currentSong.value?.id)
+    }
+
     // ── Helpers ──
 
     private suspend fun awaitState(target: PlaybackState) {
@@ -421,13 +746,77 @@ class JusPlayerEngineTest {
             Stream(url = "stream://$songId", format = "mp3", bitrate = 0, sampleRate = 0, isLive = false, duration = 180_000)
     }
 
+    /**
+     * Resolves [getStream] only after [release] — deterministic gating so tests
+     * can control exactly when a stream resolution completes.
+     */
+    private class GatedProvider : MusicProvider {
+        private val gates = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+        override val name = "gated"
+        override val capabilities = ProviderCapabilities()
+
+        override suspend fun search(query: String): SearchResult =
+            SearchResult(emptyList(), emptyList(), emptyList(), emptyList())
+
+        override suspend fun getSong(id: String) = throw UnsupportedOperationException()
+
+        override suspend fun getStream(songId: String): Stream {
+            gateFor(songId).await()
+            return Stream(url = "stream://$songId", format = "mp3", bitrate = 0, sampleRate = 0, isLive = false, duration = 180_000)
+        }
+
+        fun release(songId: String) {
+            gateFor(songId).complete(Unit)
+        }
+
+        private fun gateFor(songId: String): CompletableDeferred<Unit> =
+            gates.getOrPut(songId) { CompletableDeferred() }
+    }
+
+    /** Never resolves in time; used with a small [JusPlayerConfig.streamTimeoutMs]. */
+    private class SlowProvider : MusicProvider {
+        override val name = "slow"
+        override val capabilities = ProviderCapabilities()
+
+        override suspend fun search(query: String): SearchResult =
+            SearchResult(emptyList(), emptyList(), emptyList(), emptyList())
+
+        override suspend fun getSong(id: String) = throw UnsupportedOperationException()
+
+        override suspend fun getStream(songId: String): Stream {
+            delay(10_000)
+            return Stream(url = "stream://$songId", format = "mp3", bitrate = 0, sampleRate = 0, isLive = false, duration = 180_000)
+        }
+    }
+
+    /** Fails stream resolution for [failingIds], succeeds for everything else. */
+    private class SelectiveFailingProvider(private vararg val failingIds: String) : MusicProvider {
+        override val name = "selective"
+        override val capabilities = ProviderCapabilities()
+
+        override suspend fun search(query: String): SearchResult =
+            SearchResult(emptyList(), emptyList(), emptyList(), emptyList())
+
+        override suspend fun getSong(id: String) = throw UnsupportedOperationException()
+
+        override suspend fun getStream(songId: String): Stream {
+            if (songId in failingIds) {
+                throw org.jusplayer.engine.provider.ProviderException.Network("no stream for $songId")
+            }
+            return Stream(url = "stream://$songId", format = "mp3", bitrate = 0, sampleRate = 0, isLive = false, duration = 180_000)
+        }
+    }
+
     private class FakePlayerAdapter : PlayerAdapter {
         val seeks = mutableListOf<Duration>()
+        val playedUrls = mutableListOf<String>()
         var positionValue: Duration? = null
         override val position: Duration?
             get() = positionValue
 
-        override suspend fun play(stream: Stream) = Unit
+        override suspend fun play(stream: Stream) {
+            playedUrls += stream.url
+        }
         override fun pause() = Unit
         override fun stop() = Unit
         override fun seek(position: Duration) {
@@ -436,6 +825,7 @@ class JusPlayerEngineTest {
 
         fun reset() {
             seeks.clear()
+            playedUrls.clear()
             positionValue = null
         }
     }

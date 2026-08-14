@@ -120,9 +120,11 @@ class NewPipeProvider : MusicProvider, RelatedProvider {
         }
 
     /**
-     * Retries an extraction when the extractor reports that the page needs to be
-     * reloaded. This is a known transient NewPipeExtractor condition on YouTube;
-     * a second attempt usually succeeds.
+     * Retries an extraction when the extractor reports a *transient* "page needs
+     * to be reloaded" failure — a known NewPipeExtractor condition on YouTube
+     * where a second attempt usually succeeds. Permanent availability errors
+     * (e.g. a genuinely missing video) are not retried and surface immediately
+     * as [ProviderException.NotFound].
      */
     private suspend inline fun <T> withRetry(attempts: Int = 3, block: () -> T): T {
         var remaining = attempts
@@ -130,10 +132,16 @@ class NewPipeProvider : MusicProvider, RelatedProvider {
             try {
                 return block()
             } catch (e: ContentNotAvailableException) {
+                if (!isTransient(e)) throw e
                 if (remaining-- <= 1) throw e
                 delay(RETRY_DELAY_MILLIS)
             }
         }
+    }
+
+    private fun isTransient(e: ContentNotAvailableException): Boolean {
+        val message = e.message?.lowercase() ?: return false
+        return TRANSIENT_MARKERS.any { message.contains(it) }
     }
 
     private inline fun <T> runExtraction(operation: String, block: () -> T): T {
@@ -154,5 +162,6 @@ class NewPipeProvider : MusicProvider, RelatedProvider {
 
     companion object {
         private const val RETRY_DELAY_MILLIS = 500L
+        private val TRANSIENT_MARKERS = listOf("reload", "try again", "temporarily", "retry")
     }
 }

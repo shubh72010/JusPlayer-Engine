@@ -258,6 +258,68 @@ class QueueEngineTest {
     }
 
     @Test
+    fun testNextIgnoringRepeatOneEscapesOne() {
+        queue.addAll(listOf(createSong("1"), createSong("2"), createSong("3")))
+        queue.setRepeatMode(RepeatMode.ONE)
+        queue.next()
+        assertEquals(createSong("1"), queue.currentSong)
+        // Plain next() under ONE re-selects the same track; the escape advances.
+        assertEquals(createSong("2"), queue.nextIgnoringRepeatOne())
+        assertEquals(createSong("3"), queue.nextIgnoringRepeatOne())
+        assertNull(queue.nextIgnoringRepeatOne())
+    }
+
+    @Test
+    fun testNextIgnoringRepeatOneStillWrapsUnderAll() {
+        queue.addAll(listOf(createSong("1"), createSong("2")))
+        queue.setRepeatMode(RepeatMode.ALL)
+        queue.next()
+        assertEquals(createSong("2"), queue.nextIgnoringRepeatOne())
+        // Under ALL the escape still wraps to the front.
+        assertEquals(createSong("1"), queue.nextIgnoringRepeatOne())
+    }
+
+    @Test
+    fun testPruneConsumedRemovesPrefixAndKeepsCurrent() {
+        queue.addAll(listOf(createSong("1"), createSong("2"), createSong("3")))
+        queue.jumpTo(1)
+        val current = queue.currentSong
+        queue.pruneConsumed()
+        assertEquals(listOf("2", "3"), queue.items.map { it.id })
+        assertEquals(0, queue.currentIndexValue)
+        assertEquals(current, queue.currentSong)
+    }
+
+    @Test
+    fun testPruneConsumedIsNoopWhenUnstarted() {
+        queue.addAll(listOf(createSong("1"), createSong("2")))
+        queue.pruneConsumed()
+        assertEquals(listOf("1", "2"), queue.items.map { it.id })
+    }
+
+    @Test
+    fun testPruneConsumedKeepsRestoreConsistent() {
+        queue.addAll(listOf(createSong("1"), createSong("2"), createSong("3"), createSong("4")))
+        queue.next()          // song 1 starts
+        queue.shuffle()       // current stays first, cursor 0
+        queue.next()          // advance into the shuffled order (cursor 1)
+        val currentAfterAdvance = queue.currentSong
+        queue.pruneConsumed() // removes the consumed track now behind the cursor
+        assertEquals(currentAfterAdvance, queue.currentSong)
+        queue.restore()
+        // Original order minus the consumed "1", current track preserved.
+        assertEquals(listOf("2", "3", "4"), queue.items.map { it.id })
+        assertEquals(currentAfterAdvance, queue.currentSong)
+    }
+
+    @Test
+    fun testAddNextInsertsAtFrontWhenUnstartedNonEmpty() {
+        queue.addAll(listOf(createSong("1"), createSong("2")))
+        queue.addNext(createSong("X"))
+        assertEquals(listOf("X", "1", "2"), queue.items.map { it.id })
+    }
+
+    @Test
     fun testSnapshotPortraysState() {
         queue.add(createSong("1"))
         val snapshot = queue.state.value

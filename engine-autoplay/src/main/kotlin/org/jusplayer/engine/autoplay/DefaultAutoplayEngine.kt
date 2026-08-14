@@ -1,5 +1,7 @@
 package org.jusplayer.engine.autoplay
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -26,11 +28,21 @@ class DefaultAutoplayEngine(
         val candidates = coroutineScope {
             providers.map { provider ->
                 async {
-                    runCatching {
+                    // A per-provider timeout or failure only drops that
+                    // provider's contribution; real cancellation (parent scope
+                    // torn down) must propagate, so CancellationException (other
+                    // than the timeout's own) is rethrown.
+                    try {
                         withTimeout(config.providerTimeoutMs) {
                             provider.recommend(context, config.bufferSize * 2)
                         }
-                    }.getOrDefault(emptyList())
+                    } catch (e: TimeoutCancellationException) {
+                        emptyList()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
                 }
             }.awaitAll().flatten()
         }

@@ -11,7 +11,6 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import java.time.Duration
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import java.awt.Desktop
 import java.net.URI
@@ -49,23 +48,20 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
     private val artworkProvider = CoverArtArchiveProvider()
     private val releaseResolver = MusicBrainzResolver()
 
-    private val player = runBlocking {
-        createJusPlayer {
-            provider(this@JusPlayerHttpEngine.provider)
-            lyricsProvider(this@JusPlayerHttpEngine.lyricsProvider)
-            artworkProvider(this@JusPlayerHttpEngine.artworkProvider)
-            releaseResolver(this@JusPlayerHttpEngine.releaseResolver)
-            player(NoopPlayerAdapter())
-            // Bake autoplay into the engine: prefer the platform's own
-            // recommendations (YouTube related streams) and blend in session
-            // search, then let the engine's real pipeline (dedupe, exclude,
-            // score, rank, diversify) decide what actually gets queued.
-            recommendationProvider(SearchRecommendationProvider(this@JusPlayerHttpEngine.provider))
-            autoplay(AutoplayConfig(bufferSize = 5, maxConsecutiveSameArtist = 2))
-            autoplayEnabled(true)
-        }
+    private val player = createJusPlayer {
+        provider(this@JusPlayerHttpEngine.provider)
+        lyricsProvider(this@JusPlayerHttpEngine.lyricsProvider)
+        artworkProvider(this@JusPlayerHttpEngine.artworkProvider)
+        releaseResolver(this@JusPlayerHttpEngine.releaseResolver)
+        player(NoopPlayerAdapter())
+        // Bake autoplay into the engine: prefer the platform's own
+        // recommendations (YouTube related streams) and blend in session
+        // search, then let the engine's real pipeline (dedupe, exclude,
+        // score, rank, diversify) decide what actually gets queued.
+        recommendationProvider(SearchRecommendationProvider(this@JusPlayerHttpEngine.provider))
+        autoplay(AutoplayConfig(bufferSize = 5, maxConsecutiveSameArtist = 2))
+        autoplayEnabled(true)
     }
-
     fun start(openBrowser: Boolean = true) {
         embeddedServer(Netty, port = port) {
             environment.monitor.subscribe(ApplicationStarted) {
@@ -116,7 +112,7 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                         return@get
                     }
                     runCatching {
-                        val songs = runBlocking { player.engine.search(q) }
+                        val songs = player.engine.search(q)
                         call.respond(SearchResponse(songs = songs))
                     }.getOrElse {
                         call.respond(mapOf("error" to (it.message ?: "unknown")))
@@ -126,7 +122,7 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 get("/v1/stream/{id}") {
                     val id = call.parameters["id"] ?: ""
                     runCatching {
-                        val stream = runBlocking { provider.getStream(id) }
+                        val stream = provider.getStream(id)
                         call.respond(stream)
                     }.getOrElse {
                         call.respond(mapOf("error" to (it.message ?: "unknown")))
@@ -136,8 +132,8 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 get("/v1/lyrics/{id}") {
                     val id = call.parameters["id"] ?: ""
                     try {
-                        val song = runBlocking { provider.getSong(id) }
-                        val lyrics = runBlocking { player.engine.lyrics(song) }
+                        val song = provider.getSong(id)
+                        val lyrics = player.engine.lyrics(song)
                         if (lyrics != null) {
                             call.respond(LyricsResponse(status = "ok", provider = lyricsProvider.name, lyrics = lyrics))
                         } else {
@@ -157,8 +153,8 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 get("/v1/artwork/{id}") {
                     val id = call.parameters["id"] ?: ""
                     try {
-                        val song = runBlocking { provider.getSong(id) }
-                        val artwork = runBlocking { player.engine.artwork(song) }
+                        val song = provider.getSong(id)
+                        val artwork = player.engine.artwork(song)
                         if (artwork != null) {
                             call.respond(ArtworkResponse(status = "ok", provider = artworkProvider.name, artwork = artwork))
                         } else {
@@ -185,7 +181,7 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                         return@get
                     }
                     runCatching {
-                        val songs = runBlocking { recProvider.getRecommendations(id, limit) }
+                        val songs = recProvider.getRecommendations(id, limit)
                         call.respond(SearchResponse(songs = songs))
                     }.getOrElse {
                         call.respond(mapOf("error" to (it.message ?: "unknown")))
@@ -199,8 +195,8 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 post("/v1/player/play/{id}") {
                     val id = call.parameters["id"] ?: ""
                     runCatching {
-                        val song = runBlocking { provider.getSong(id) }
-                        runBlocking { player.engine.play(song) }
+                        val song = provider.getSong(id)
+                        player.engine.play(song)
                         call.respond(mapOf("ok" to true))
                     }.getOrElse {
                         call.respond(mapOf("error" to (it.message ?: "unknown")))
@@ -208,12 +204,12 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 }
 
                 post("/v1/player/next") {
-                    runBlocking { player.engine.next() }
+                    player.engine.next()
                     call.respond(mapOf("ok" to true))
                 }
 
                 post("/v1/player/previous") {
-                    runBlocking { player.engine.previous() }
+                    player.engine.previous()
                     call.respond(mapOf("ok" to true))
                 }
 
@@ -221,9 +217,8 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                     player.engine.pause()
                     call.respond(mapOf("ok" to true))
                 }
-
                 post("/v1/player/stop") {
-                    runBlocking { player.engine.stop() }
+                    player.engine.stop()
                     call.respond(mapOf("ok" to true))
                 }
 
@@ -238,23 +233,28 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                 }
 
                 // The web client owns the <audio> element. When a track ends in
-                // the browser it reports the natural end here; the engine then
-                // auto-advances (and autoplays when the queue is exhausted).
+                // the browser it reports the natural end here, identifying the
+                // song and playback session (generation) that just ended. The
+                // engine validates both against its active session so a stale or
+                // duplicate completion from a previous track cannot advance or
+                // restart playback out of order.
                 post("/v1/player/song-ended") {
                     val ms = call.request.queryParameters["ms"]?.toLongOrNull() ?: 0L
+                    val songId = call.request.queryParameters["song"].orEmpty()
+                    val generation = call.request.queryParameters["generation"]?.toLongOrNull()
                     val current = player.engine.currentSong.value
-                    if (current != null) {
-                        runBlocking { player.events.emit(SongEnded(song = current, position = ms)) }
-                        call.respond(mapOf("ok" to true))
-                    } else {
-                        call.respond(mapOf("error" to "no current song"))
+                    if (current == null || songId != current.id) {
+                        call.respond(mapOf("error" to "stale or unknown song"))
+                        return@post
                     }
+                    player.events.emit(SongEnded(song = current, position = ms, generation = generation))
+                    call.respond(mapOf("ok" to true))
                 }
 
                 post("/v1/player/queue/add/{id}") {
                     val id = call.parameters["id"] ?: ""
                     runCatching {
-                        val song = runBlocking { provider.getSong(id) }
+                        val song = provider.getSong(id)
                         player.queue.add(song)
                         call.respond(mapOf("ok" to true))
                     }.getOrElse {
@@ -326,6 +326,7 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
             shuffleEnabled = snapshot.shuffleEnabled,
             autoplayEnabled = player.engine.autoplayEnabled.value,
             autoplayCandidates = player.engine.autoplayCandidates.value,
+            generation = player.engine.currentPlayback.value?.generation,
         )
     }
 
@@ -448,6 +449,7 @@ data class PlayerStateResponse(
     val shuffleEnabled: Boolean,
     val autoplayEnabled: Boolean,
     val autoplayCandidates: List<JpSong>,
+    val generation: Long? = null,
 )
 
 @Serializable

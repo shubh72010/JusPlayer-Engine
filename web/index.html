@@ -153,7 +153,7 @@ const audio = $('audio');
 audio.volume = 0.8;
 
 let state = { state: 'Idle', currentSong: null, queue: [], currentIndex: -1,
-              repeatMode: 'NONE', shuffleEnabled: false, autoplayEnabled: true, autoplayCandidates: [] };
+              repeatMode: 'NONE', shuffleEnabled: false, autoplayEnabled: true, autoplayCandidates: [], generation: null };
 let loadedSongId = null;
 
 function fmt(ms) {
@@ -270,7 +270,8 @@ async function tick() {
       JSON.stringify(next.queue || []) !== JSON.stringify(state.queue || []) ||
       next.repeatMode !== state.repeatMode ||
       next.shuffleEnabled !== state.shuffleEnabled ||
-      next.autoplayEnabled !== state.autoplayEnabled;
+      next.autoplayEnabled !== state.autoplayEnabled ||
+      next.generation !== state.generation;
     state = next;
     if (changed) {
       renderControls();
@@ -328,10 +329,13 @@ audio.addEventListener('timeupdate', () => {
 });
 audio.addEventListener('loadedmetadata', () => $('totTime').textContent = fmt(audio.duration * 1000));
 
-// Natural end in the browser -> tell the engine; it advances the queue and
-// autoplays when exhausted. The poll then picks up the new current song.
+// Natural end in the browser -> tell the engine, identifying the song and
+// playback session that ended so stale completions are rejected. The poll then
+// picks up the new current song.
 audio.addEventListener('ended', () => {
-  post('/v1/player/song-ended?ms=' + Math.round(audio.currentTime * 1000)).catch(() => {});
+  post('/v1/player/song-ended?ms=' + Math.round(audio.currentTime * 1000) +
+      '&song=' + encodeURIComponent(loadedSongId || '') +
+      '&generation=' + (state.generation == null ? '' : state.generation)).catch(() => {});
 });
 audio.addEventListener('play', () => setStatus('playing', 'play'));
 audio.addEventListener('pause', () => { if (audio.currentTime === 0 || audio.ended) return; setStatus('paused'); });

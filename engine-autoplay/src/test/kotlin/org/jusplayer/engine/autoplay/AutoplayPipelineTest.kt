@@ -122,6 +122,31 @@ class AutoplayPipelineTest {
         assertTrue(result.isEmpty())
     }
 
+    @Test
+    fun normalizeTrimsWhitespaceIds() {
+        val trimmed = AutoplayPipeline.normalize(listOf(song(" padded ")))
+        assertEquals("padded", trimmed.single().id)
+    }
+
+    @Test
+    fun normalizeDropsBlankIds() {
+        val result = AutoplayPipeline.normalize(listOf(song(""), song("   "), song("ok")))
+        assertEquals(listOf("ok"), result.map { it.id })
+    }
+
+    @Test
+    fun processFiltersBlankAndDeduplicatesTrimmedIds() {
+        val result = AutoplayPipeline.process(
+            candidates = listOf(song(" dup "), song("dup"), song("   "), song("fresh")),
+            currentSong = song("current"),
+            queueSongs = emptyList(),
+            history = history,
+            config = config,
+        )
+        // " dup " is normalized to "dup" and deduped; the blank id is dropped.
+        assertEquals(setOf("dup", "fresh"), result.map { it.id }.toSet())
+    }
+
     private fun artist(id: String) = Artist(id, id, null)
 
     private fun song(id: String, vararg artists: Artist): Song = Song(

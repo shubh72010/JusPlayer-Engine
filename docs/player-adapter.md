@@ -69,8 +69,13 @@ createJusPlayer {
 |-------------|--------------|---------------------|
 | `engine.play(song)` | `play(stream)` (suspend) | Start decoding/output; the URL comes from the provider |
 | `engine.pause()` | `pause()` | Pause but keep the position |
+| `engine.resume()` | `play(stream)` (suspend) | Resume from the paused position. The engine re-sends the cached stream when it still belongs to the resumed song; otherwise it re-resolves the stream (e.g. the user paused while an auto-advance was still loading) |
 | `engine.stop()` | `stop()` | Release resources, reset position |
 | `engine.seek(d)` | `seek(d)` | Seek to the given position |
+
+`pause()` and `resume()` are `suspend` and `resume()` begins a **new playback
+session** (a fresh generation), so it can never be mistaken for a continuation of
+the paused one.
 
 Because `play` is `suspend`, long setup (prepare, buffer, open the URL) can run
 suspending code without blocking the caller.
@@ -94,13 +99,23 @@ import org.jusplayer.engine.events.SongEnded
 import org.jusplayer.engine.events.SongStarted
 
 suspend fun notifyStarted(bus: EventBus, song: Song) = bus.emit(SongStarted(song, 0L))
-suspend fun notifyEnded(bus: EventBus, song: Song) = bus.emit(SongEnded(song, positionMs))
+suspend fun notifyEnded(bus: EventBus, song: Song, generation: Long? = null) =
+    bus.emit(SongEnded(song, positionMs, generation = generation))
 ```
 
 `SongEnded` is the **natural-end** signal and must only be emitted when audio
 actually reached its end. Manual actions (`stop`, `next`, `previous`, `pause`)
 must never emit it — otherwise they'd be mistaken for a natural end and could
 accidentally trigger autoplay or advance the wrong track.
+
+The optional `generation` identifies the playback session (read from
+`engine.currentPlayback`'s `generation`); attaching it lets the engine ignore
+**stale** and **duplicate** completions — e.g. a late `ended` from a track the
+user already skipped, or a second `ended` for the same session. Even with a
+generation, the `SongEnded`'s song must match the song actually playing — the
+generation identifies the session, not the track. When omitted, the engine falls
+back to matching by song id only (fine unless the same song is replayed
+back-to-back).
 
 ## Adapters for real engines
 

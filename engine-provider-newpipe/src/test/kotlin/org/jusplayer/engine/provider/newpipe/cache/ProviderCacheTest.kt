@@ -57,4 +57,39 @@ class ProviderCacheTest {
         cache.put("b", 2)
         assertEquals(2, cache.size)
     }
+
+    @Test
+    fun evictsOldestBeyondMaxSize() {
+        val cache = ProviderCache(maxSize = 3)
+        cache.put("a", 1)
+        cache.put("b", 2)
+        cache.put("c", 3)
+        cache.put("d", 4)
+        assertEquals(3, cache.size)
+        // Insertion-order eviction: "a" was the first inserted and is gone.
+        assertNull(cache.get<String>("a"))
+        assertEquals(2, cache.get<Int>("b"))
+        assertEquals(4, cache.get<Int>("d"))
+    }
+
+    @Test
+    fun overwritingSameKeyDoesNotCountTwice() {
+        val cache = ProviderCache(maxSize = 2)
+        cache.put("a", 1)
+        cache.put("a", 2)
+        cache.put("b", 3)
+        assertEquals(2, cache.size)
+        assertEquals(2, cache.get<Int>("a"))
+        assertEquals(3, cache.get<Int>("b"))
+    }
+
+    @Test
+    fun maxSizeOfOneKeepsOnlyLatest() {
+        val cache = ProviderCache(maxSize = 1)
+        cache.put("a", 1)
+        cache.put("b", 2)
+        assertEquals(1, cache.size)
+        assertNull(cache.get<Int>("a"))
+        assertEquals(2, cache.get<Int>("b"))
+    }
 }

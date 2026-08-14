@@ -57,20 +57,62 @@ All responses are JSON. Errors return `{"error": "message"}`.
 | GET | `/v1/lyrics/{id}` | Lyrics for a song id |
 | GET | `/v1/artwork/{id}` | Cover art for a song id |
 | GET | `/v1/recommendations/{id}?limit=` | Platform-native (YouTube related) recommendations |
-| GET | `/v1/player/state` | Playback state: state, current song, queue, repeat, shuffle, autoplay |
+| GET | `/v1/player/state` | Playback state: state, current song, queue, repeat, shuffle, autoplay, generation |
 | POST | `/v1/player/play/{id}` | Queue + play a song through the engine |
 | POST | `/v1/player/next` | Advance to the next track |
 | POST | `/v1/player/previous` | Go back one (restarts current >3s in) |
 | POST | `/v1/player/pause` | Pause |
 | POST | `/v1/player/stop` | Stop |
 | POST | `/v1/player/seek?ms=` | Seek to a position |
-| POST | `/v1/player/song-ended?ms=` | Report a natural end (triggers auto-advance/autoplay) |
+| POST | `/v1/player/song-ended?ms=&song=&generation=` | Report a natural end (triggers auto-advance/autoplay) |
 | POST | `/v1/player/queue/add/{id}` | Add a song to the queue |
 | POST | `/v1/player/queue/remove/{index}` | Remove by queue index |
 | POST | `/v1/player/queue/clear` | Clear the queue |
 | POST | `/v1/player/repeat?mode=NONE\|ONE\|ALL` | Set repeat mode |
 | POST | `/v1/player/shuffle?enabled=` | Toggle shuffle |
 | POST | `/v1/player/autoplay?enabled=` | Toggle autoplay |
+
+### Natural-end reporting (`song-ended`)
+
+The web client owns the `<audio>` element, so when a track ends in the browser it
+must tell the engine — that's what triggers auto-advance (and autoplay when the
+queue is exhausted). Since the engine cannot see the browser's `ended` event
+itself, the client identifies **which playback session** ended:
+
+```
+POST /v1/player/song-ended?ms=214000&song=dQw4w9WgXcQ&generation=7
+```
+
+- `song` — the id of the song that ended (must match the engine's current song).
+- `generation` — the playback session's generation, read from the `generation`
+  field of `GET /v1/player/state`.
+
+The engine validates both against its active playback session, so a **stale**
+completion (e.g. the previous track's `ended` event arriving after the user
+already skipped or the poll started a new song) or a **duplicate** completion is
+rejected instead of advancing/restarting playback out of order. A request whose
+`song` doesn't match the current song is answered with
+`{"error": "stale or unknown song"}` and ignored.
+
+### `GET /v1/player/state`
+
+```json
+{
+  "state": "PLAYING",
+  "currentSong": { "id": "dQw4w9WgXcQ", "title": "...", "artists": [...] },
+  "queue": [],
+  "currentIndex": 0,
+  "repeatMode": "NONE",
+  "shuffleEnabled": false,
+  "autoplayEnabled": true,
+  "autoplayCandidates": [],
+  "generation": 7
+}
+```
+
+`generation` identifies the active playback session (see above). It is `null`
+when idle/paused/stopped. Poll it alongside `state`/`currentSong` so the UI can
+send the correct value on `song-ended`.
 
 ### `GET /health`
 

@@ -31,7 +31,7 @@ object AutoplayPipeline {
         config: AutoplayConfig,
     ): List<Song> {
         val filtered = exclude(
-            dedupe(candidates),
+            dedupe(normalize(candidates)),
             excludedIds = buildSet {
                 add(currentSong.id)
                 addAll(queueSongs.map { it.id })
@@ -48,6 +48,17 @@ object AutoplayPipeline {
             .map { it.first }
         return diversify(ranked, config.maxConsecutiveSameArtist).take(config.bufferSize)
     }
+
+    /**
+     * Normalizes song ids before pipeline stages: trims surrounding whitespace
+     * and drops songs with blank/whitespace-only ids so deduplication and
+     * exclusion are reliable.
+     */
+    fun normalize(songs: List<Song>): List<Song> =
+        songs.mapNotNull { song ->
+            val id = song.id.trim()
+            if (id.isEmpty()) null else if (id == song.id) song else song.copy(id = id)
+        }
 
     /** Removes duplicate song ids (first occurrence wins). */
     fun dedupe(songs: List<Song>): List<Song> = songs.distinctBy { it.id }

@@ -38,6 +38,10 @@ class LRCLIBProvider(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** Earliest wall-clock time (epoch millis) at which the next request may start. */
+    @Volatile
+    private var nextAllowedAt = 0L
+
     override suspend fun getLyrics(song: Song): Lyrics? = withContext(Dispatchers.IO) {
         val artist = song.artists.firstOrNull()?.name.orEmpty()
         if (song.title.isBlank() || artist.isBlank()) {
@@ -55,7 +59,7 @@ class LRCLIBProvider(
             append("&duration=").append(song.duration.coerceIn(1, 3600))
         }
 
-        delay(throttleMillis)
+        delay(untilNextAllowedAt())
 
         val response = runExtraction("Lyrics for \"${song.title}\"") {
             transport.get(url, headers = mapOf("Accept" to "application/json"))
@@ -65,8 +69,10 @@ class LRCLIBProvider(
             in 200..299 -> parseLyrics(song, response.body)
             404 -> throw ProviderException.NotFound("No LRCLIB lyrics for \"${song.title}\"")
             429 -> {
-                val retryAfter = response.headers["retry-after"]?.firstOrNull()
-                    ?: response.headers["Retry-After"]?.firstOrNull()
+                val retryAfter = retryAfterSeconds(response)
+                if (retryAfter != null) {
+                    nextAllowedAt = System.currentTimeMillis() + retryAfter * 1000
+                }
                 throw ProviderException.RateLimited(
                     "LRCLIB rate limit exceeded" + (retryAfter?.let { "; retry after $it seconds" } ?: ""),
                 )
@@ -75,6 +81,23 @@ class LRCLIBProvider(
                 "LRCLIB returned unexpected status ${response.status}",
             )
         }
+    }
+
+    /**
+     * Delays until the base per-request throttle and any Retry-After backoff
+     * (remembered from a previous 429) have both elapsed.
+     */
+    private suspend fun untilNextAllowedAt(): Long {
+        val wait = maxOf(throttleMillis, nextAllowedAt - System.currentTimeMillis())
+        if (wait > 0) delay(wait)
+        return wait
+    }
+
+    private fun retryAfterSeconds(response: HttpTransport.Response): Long? {
+        val header = response.headers["retry-after"]?.firstOrNull()
+            ?: response.headers["Retry-After"]?.firstOrNull()
+            ?: return null
+        return header.trim().toLongOrNull()?.takeIf { it > 0 }
     }
 
     private fun parseLyrics(song: Song, body: String): Lyrics? {

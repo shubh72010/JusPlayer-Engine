@@ -1,6 +1,7 @@
 package org.jusplayer.engine.provider.newpipe.mapping
 
 import org.jusplayer.engine.model.Stream
+import org.jusplayer.engine.provider.ProviderException
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.Stream as ExtractStream
 import org.schabi.newpipe.extractor.stream.StreamType
@@ -28,9 +29,13 @@ object StreamMapper {
         val fallbackVideo = videoStreams.firstOrNull()
 
         val selected = bestAudio ?: fallbackVideo
+        val url = selected?.content?.takeIf { it.isNotBlank() }
+            ?: throw ProviderException.NotFound(
+                "No playable stream for this song (no audio/video URL extracted)",
+            )
         return Stream(
-            url = selected?.content ?: "",
-            format = selected?.format?.suffix ?: "unknown",
+            url = url,
+            format = selected.format?.suffix ?: "unknown",
             bitrate = bestAudio?.let { effectiveBitrate(it)?.toLong() },
             sampleRate = null,
             isLive = streamType.isLive(),

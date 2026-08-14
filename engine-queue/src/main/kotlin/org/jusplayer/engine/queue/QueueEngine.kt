@@ -68,19 +68,26 @@ class QueueEngine {
 
     /**
      * Inserts [song] immediately after the current track. With an empty queue
-     * the song becomes the first item (the cursor stays unstarted).
+     * the song becomes the first item (the cursor stays unstarted). When the
+     * queue is unstarted but non-empty (cursor `-1`) the song is inserted at
+     * the front — the position "play next" means when nothing is current.
+     * The insertion is mirrored into the pre-shuffle order so [restore] never
+     * loses entries.
      */
     fun addNext(song: Song) = synchronized(lock) {
         val item = QueueItem(song)
         if (entries.isEmpty()) {
             entries.add(item)
             originalEntries?.add(item)
+        } else if (cursor !in entries.indices) {
+            entries.add(0, item)
+            originalEntries?.add(0, item)
         } else {
-            val at = QueueOrder.insertAfterIndex(entries.size, cursor)
+            val at = cursor + 1
             entries.add(at, item)
-            val current = entries.getOrNull(cursor)
+            val current = entries[cursor]
             val original = originalEntries
-            if (current != null && original != null) {
+            if (original != null) {
                 val oi = original.indexOfFirst { it === current }
                 if (oi >= 0) original.add((oi + 1).coerceIn(0, original.size), item)
             }
@@ -213,6 +220,45 @@ class QueueEngine {
             publish()
             entries[cursor].song
         }
+    }
+
+    /**
+     * Moves the cursor to the next track as if [RepeatMode.NONE], ignoring a
+     * [RepeatMode.ONE] re-selection. Lets a user skip a track that failed to
+     * play instead of being stuck on it forever. Returns `null` when exhausted
+     * under a non-wrapping mode.
+     */
+    fun nextIgnoringRepeatOne(): Song? = synchronized(lock) {
+        val mode = if (repeat == RepeatMode.ONE) RepeatMode.NONE else repeat
+        val index = QueueOrder.nextIndex(entries.size, cursor, mode)
+        if (index == null) {
+            publish()
+            null
+        } else {
+            cursor = index
+            publish()
+            entries[cursor].song
+        }
+    }
+
+    /**
+     * Removes every item strictly before the current cursor (tracks already
+     * consumed), so autoplay replenishment cannot grow the queue without bound.
+     * No-op when unstarted or when nothing precedes the cursor. The pre-shuffle
+     * order is mirrored so [restore] stays consistent.
+     */
+    fun pruneConsumed() = synchronized(lock) {
+        if (cursor <= 0) return
+        val removed = entries.take(cursor)
+        repeat(cursor) { entries.removeAt(0) }
+        originalEntries?.let { original ->
+            removed.forEach { item ->
+                val idx = original.indexOfFirst { it === item }
+                if (idx >= 0) original.removeAt(idx)
+            }
+        }
+        cursor = 0
+        publish()
     }
 
     /** Index of the first item equal to [song] (by id), or `-1`. */
