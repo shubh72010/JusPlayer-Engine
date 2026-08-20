@@ -70,6 +70,7 @@ You provide those. That split is the whole point — one engine, many hosts.
 | `MusicProvider` | Search + song + stream URLs for one backend (e.g. YouTube) |
 | `LyricsProvider` | Returns `Lyrics` for a `Song`, or `null` |
 | `ArtworkProvider` | Returns `Artwork` (URLs) for a MusicBrainz release MBID |
+| `SongArtworkProvider` | `ArtworkProvider` variant that resolves from the `Song` directly (no MBID) |
 | `ReleaseResolver` | Bridges a streaming `Song` to a MusicBrainz release MBID |
 | `PlayerAdapter` | The audio output — `play`, `pause`, `stop`, `seek` |
 | `QueueEngine` | Ordered list of songs to play |

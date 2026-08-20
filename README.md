@@ -26,8 +26,10 @@ a plain JVM.
 |---------|--------------|
 | **Provider abstraction** | Swap backends behind one `MusicProvider` interface |
 | **Streams** | YouTube search + stream URLs via the bundled NewPipe provider |
-| **Lyrics** | Synced + plain lyrics via LRCLIB |
-| **Artwork** | Cover art via Cover Art Archive + MusicBrainz resolution |
+| **Lyrics** | Synced + word-timed lyrics via LRCLIB, KuGou, SimpMusic, Paxsenix, BetterLyrics, Unison, YouLyPlus |
+| **Artwork** | Cover art via Cover Art Archive + MusicBrainz, animated canvases via Apple Music Canvas |
+| **Scrobbling** | Last.fm / Libre.fm scrobbling and now-playing via `ScrobbleManager` |
+| **Track matching** | Fuzzy title/artist/duration scoring (Spotify-style) in `engine-utils` |
 | **Queue** | Add, move, shuffle, next/previous, repeat, clear |
 | **Coroutine flows** | `StateFlow` state, `SharedFlow` events, all `suspend`-friendly |
 | **Zero Android deps** | Plain JVM — CLIs, servers, desktop, or Android |
@@ -44,13 +46,18 @@ val jusPlayer = createJusPlayer {
     releaseResolver(MusicBrainzResolver())     // optional: song -> release
     player(MyPlayerAdapter())                  // required: your audio output
 }
-
 val songs = jusPlayer.engine.search("Daft Punk")
 songs.firstOrNull()?.let {
     jusPlayer.queue.add(it)
     jusPlayer.engine.play(it)
 }
 ```
+
+Lyrics and artwork providers are interchangeable — swap `LRCLIBProvider()` for
+`KuGouProvider()`, `SimpMusicProvider()`, `PaxsenixProvider()`,
+`BetterLyricsProvider()`, `UnisonProvider()`, or `YouLyPlusProvider()`, and add
+`artworkProvider(CanvasArtworkProvider())` for animated canvases. See
+[Providers](docs/providers.md).
 
 ## Architecture
 
@@ -61,12 +68,13 @@ songs.firstOrNull()?.let {
                            │
                       JusPlayer Engine  (queue, services, state)
                            │
-             ┌─────────────┼─────────────┐
+┌─────────────┼─────────────┐
         MusicProvider  LyricsProvider  ArtworkProvider
-             │               │               │
-          NewPipe          LRCLIB       CoverArtArchive
-                                           (MusicBrainzResolver)
-             │               │               │
+             │            │     │          │      │
+          NewPipe      LRCLIB  KuGou  CoverArt  Canvas
+                       SimpMusic  ...  Archive  (animated)
+                       BetterLyrics  (MusicBrainzResolver)
+             │            │     │          │      │
                        Internet
 ```
 
@@ -83,8 +91,14 @@ dependencies {
     // optional:
     implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lrclib:1.3.0")
     implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-coverartarchive:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-canvas:1.3.0")
+    implementation("com.github.shubh72010.JusPlayer-Engine:engine-provider-lastfm:1.3.0")
 }
 ```
+
+Every provider is its own artifact — grab only what you need. The lyrics
+providers (`kugou`, `simpmusic`, `paxsenix`, `betterlyrics`, `unison`,
+`youlyplus`) and Last.fm (`lastfm`) follow the same `:module:version` pattern.
 
 ## Documentation
 

@@ -18,4 +18,6 @@ data class Artwork(
     val source: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Portrait/video variant of the artwork (e.g. Apple Music canvas), when available. */
+    val verticalUrl: String? = null,
 )

@@ -87,11 +87,40 @@ data class Stream(
     val mimeType: String? = null,
 )
 
+/**
+ * Song lyrics, optionally with word-level timings.
+ *
+ * [text] always holds the raw lyrics in their native format (plain text, LRC,
+ * TTML) so existing consumers keep working; [lines] exposes a parsed,
+ * format-independent view with per-line and per-word timing when a provider can
+ * produce one. All timestamps are milliseconds from the start of the song.
+ */
 @Serializable
 data class Lyrics(
     val text: String,
     val source: String,
     val synced: Boolean,
+    val lines: List<LyricsLine> = emptyList(),
+)
+
+/**
+ * A single line of timed lyrics. [start] and [end] are milliseconds from the
+ * start of the song; either may be null when the source only provides one bound.
+ */
+@Serializable
+data class LyricsLine(
+    val text: String = "",
+    val start: Long? = null,
+    val end: Long? = null,
+    val words: List<LyricsWord> = emptyList(),
+)
+
+/** A single word within a [LyricsLine], with optional per-word timing in ms. */
+@Serializable
+data class LyricsWord(
+    val text: String = "",
+    val start: Long? = null,
+    val end: Long? = null,
 )
 
 @Serializable

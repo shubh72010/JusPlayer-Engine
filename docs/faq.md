@@ -18,7 +18,9 @@ broken playback. A console adapter that just prints is enough to start.
 
 `null` means "not available", and that's graceful by design. Possible reasons:
 
-- No `LyricsProvider` (or `ArtworkProvider` **and** `ReleaseResolver`) was registered.
+- No `LyricsProvider` (or `ArtworkProvider`) was registered. A `SongArtworkProvider`
+  (e.g. Canvas) resolves from the song directly; a plain `ArtworkProvider`
+  (e.g. Cover Art Archive) additionally needs a `ReleaseResolver`.
 - The provider found no match (lyrics use title/artist matching; artwork needs a
   MusicBrainz release to resolve — titles with featured artists, covers, or typos
   often don't match).
@@ -96,7 +98,9 @@ MusicBrainz identifies releases by UUID ("MBID"). Cover Art Archive indexes imag
 by those MBIDs, not by streaming-service ids. So a `ReleaseResolver` maps your
 `Song` (which has a YouTube id) to a MusicBrainz release MBID, and then the
 `ArtworkProvider` can fetch cover art. Both must be registered for
-`engine.artwork(song)` to return anything.
+`engine.artwork(song)` to return anything with MBID-keyed artwork. A
+`SongArtworkProvider` (e.g. `CanvasArtworkProvider`) skips this — it keys off the
+song itself, so no resolver is needed.
 
 ## Is playback gapless / auto-advancing?
 

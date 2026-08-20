@@ -63,8 +63,9 @@ even if you re-fetch it.
 Four small interfaces plus the error model:
 
 - `MusicProvider` — `search`, `getSong`, `getStream`, and `capabilities`
-- `LyricsProvider` — `getLyrics(song): Lyrics?`
+- `LyricsProvider` — `getLyrics(song): Lyrics?` (word-level timings in `lines`/`words`)
 - `ArtworkProvider` — `getArtwork(releaseMbid): Artwork?`
+- `SongArtworkProvider` — `ArtworkProvider` resolving from the `Song` directly
 - `ReleaseResolver` — `resolveReleaseMbid(song): String?`
 - `ProviderException` — sealed: `NotFound`, `Network`, `RateLimited`,
   `ExtractionFailed`, `Unsupported`
@@ -138,6 +139,15 @@ and drive the scoring. The engine exposes the latest candidates on
 - **`engine-provider-coverartarchive`** — `ArtworkProvider` over Cover Art Archive
   plus a `MusicBrainzResolver` (`ReleaseResolver`). Artwork is keyed by MBID, which
   is why the resolver must run first.
+- **`engine-provider-canvas`** — `SongArtworkProvider` for animated Apple Music
+  Canvas art; resolves from the song directly (no MBID).
+- **`engine-provider-lastfm`** — not a provider role: `LastFMClient` (signed
+  Last.fm/Libre.fm API calls) + `ScrobbleManager` (pause-aware scrobbling).
+- **Lyrics providers** (`engine-provider-kugou`, `-simpmusic`, `-paxsenix`,
+  `-betterlyrics`, `-unison`, `-youlyplus`) — `LyricsProvider`s over six
+  independent lyric backends; all follow the same `ProviderException` contract.
+- **`engine-utils`** — `IdGenerator` plus `TrackMatching` (Spotify-style fuzzy
+  title/artist/duration scoring), shared by consumers.
 
 ## Dependency flow (bottom-up)
 
@@ -152,6 +162,9 @@ engine-autoplay ────────▶ engine-core
 engine-provider-api ──▶ engine-provider-newpipe
 engine-provider-api ──▶ engine-provider-lrclib
 engine-provider-api ──▶ engine-provider-coverartarchive
+engine-provider-api ──▶ engine-provider-canvas
+engine-provider-api ──▶ engine-provider-kugou | -simpmusic | -paxsenix | -betterlyrics | -unison | -youlyplus
+engine-provider-lastfm ─▶ engine-provider-api (client/scrobbler, not a provider)
 engine-api (DSL facade) ◀─ uses everything above
 engine-http / sample-console ─▶ engine-api + every provider
 ```

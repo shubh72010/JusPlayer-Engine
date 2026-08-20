@@ -21,7 +21,7 @@ authoritative and detailed — read it before changing behavior.
 - **Versioning/publishing:** the version lives in **one place** — `version=` in
   `gradle.properties`. To release: bump it there, then `git tag v<version>` and push.
   README/docs code samples may pin an older version literal (e.g. README installs at
-  `1.1.0` while `gradle.properties` is `1.2.0`) — don't "fix" those when bumping; the
+  `1.3.0` while `gradle.properties` is `1.5.1`) — don't "fix" those when bumping; the
   only source of truth is `gradle.properties`.
   `./gradlew publishToMavenLocal` publishes every module as
   `com.github.shubh72010.JusPlayer-Engine:<module>:<version>` — the group MUST be
@@ -47,19 +47,43 @@ Dependency flow is bottom-up: `engine-utils` and `engine-model` are independent
 leaves (don't depend on each other); `engine-events`, `engine-playback-api`,
 `engine-provider-api`, `engine-queue`, `engine-autoplay` → `engine-core`;
 `engine-provider-api` → `engine-provider-newpipe`, `engine-provider-lrclib`,
-`engine-provider-coverartarchive`; `engine-api` is the DSL facade;
-`engine-http` and `sample-console` consume everything.
+`engine-provider-coverartarchive`, `engine-provider-canvas`, and the six lyrics
+providers (`engine-provider-kugou`, `-simpmusic`, `-paxsenix`, `-betterlyrics`,
+`-unison`, `-youlyplus`); `engine-provider-lastfm` also depends on
+`engine-provider-api` but exposes a client + `ScrobbleManager` (not a provider
+role); `engine-api` is the DSL facade; `engine-http` and `sample-console` consume
+everything.
+
+`engine-utils` holds `IdGenerator` and `TrackMatching` (Spotify-style fuzzy
+title/artist/duration matching). `engine-model`'s `Lyrics` now carries word-level
+timings: `Lyrics(text, source, synced, lines)` → `LyricsLine(text, start?, end?,
+words)` → `LyricsWord(text, start?, end?)`, timestamps in **ms** (while
+`Song.duration` stays in **seconds**). `Artwork` gained `verticalUrl` for
+portrait/vertical media (animated canvases).
 
 - `engine-provider-newpipe` is the **only** module importing NewPipeExtractor types.
   Public APIs expose only `@Serializable` models and `ProviderException`; the objects in
   `mapping/` are the single conversion point. Keep extractor types confined here.
 - Providers are split by concern. `MusicProvider` = search/getSong/getStream;
-  `LyricsProvider.getLyrics(song)`; `ArtworkProvider.getArtwork(releaseMbid)`. Artwork
-  also needs a `ReleaseResolver` (`resolveReleaseMbid(song)`) because Cover Art Archive
-  (and MusicBrainz) are keyed by MBID, not streaming ids. The DSL wires all four:
+  `LyricsProvider.getLyrics(song)`; `ArtworkProvider.getArtwork(releaseMbid)` plus
+  `SongArtworkProvider` (a `Song`-keyed `ArtworkProvider`, used by Canvas, that
+  skips the resolver). MBID-keyed artwork needs a `ReleaseResolver`
+  (`resolveReleaseMbid(song)`) because Cover Art Archive (and MusicBrainz) are
+  keyed by MBID, not streaming ids. The DSL wires all four:
   `createJusPlayer { provider(...) lyricsProvider(...) artworkProvider(...) releaseResolver(...) player(...) }`;
   lyrics/artwork/releaseResolver are optional. `engine.lyrics(song)`/`engine.artwork(song)`
   return `null` when the corresponding provider isn't registered.
+- `engine-provider-canvas` (`CanvasArtworkProvider`) is a `SongArtworkProvider`
+  with mirror failover (`CanvasService`) + an Apple Music Canvas fallback; returns
+  `Artwork` with `frontUrl` = animated m3u8 and `verticalUrl` for portrait clips.
+- `engine-provider-lastfm` (`LastFMClient` + `ScrobbleManager`) is **not** a
+  provider — no `Provider` interface. `LastFMClient` signs requests (MD5
+  `api_sig`), supports Libre.fm via a custom endpoint, and throws
+  `LastFmException(code)`. `ScrobbleManager` scrobbles after 50% (max 180s),
+  never under 30s, is pause/resume-aware, and records `songStartedAt` timestamps.
+- The six lyrics providers (`kugou`, `simpmusic`, `paxsenix`, `betterlyrics`,
+  `unison`, `youlyplus`) all implement `LyricsProvider` over `HttpTransport` and
+  return `null` on no-match, following the shared error-mapping contract below.
 - `engine-api` (`createJusPlayer { provider(...) player(...) }`) **requires** a
   `PlayerAdapter` — it throws `IllegalStateException` otherwise. There is no default player.
   Optional autoplay wiring: `recommendationProvider(...)` (repeatable),
@@ -91,8 +115,9 @@ leaves (don't depend on each other); `engine-events`, `engine-playback-api`,
 ## Provider contract
 
 Implementing a provider means implementing one of `MusicProvider`,
-`LyricsProvider`, or `ArtworkProvider`, plus `ReleaseResolver` when bridging to
-MusicBrainz, and declaring `ProviderCapabilities` on the music provider. Providers
+`LyricsProvider`, `ArtworkProvider`, or `SongArtworkProvider`, plus
+`ReleaseResolver` when bridging to MusicBrainz, and declaring
+`ProviderCapabilities` on the music provider. Providers
 must translate raw HTTP/extractor errors into `ProviderException` subtypes
 (`NotFound`, `Network`, `RateLimited`, `ExtractionFailed`, `Unsupported`); never let
 raw exceptions escape — each provider does this in its own `runExtraction`-style
@@ -101,7 +126,10 @@ failures via `withRetry`.
 
 Non-NewPipe providers share the `HttpTransport`/`JdkHttpTransport` in
 `engine-provider-api` and parse JSON with kotlinx-serialization; sustain a
-`ProviderException` mapping (LRCLIB `404`/`429`, Cover Art Archive `503`).
+`ProviderException` mapping (LRCLIB `404`/`429`, Cover Art Archive `503`, the
+lyrics providers `404`/`429`/`503`). Providers expose an `internal` constructor
+taking an `HttpTransport` for network-free tests plus a public no-arg
+constructor defaulting to `JdkHttpTransport()`.
 
 ## Gotchas
 

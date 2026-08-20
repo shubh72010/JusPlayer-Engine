@@ -270,6 +270,19 @@
   }
   .muted { color: var(--muted); font-size: 13px; }
 
+  /* Provider test toolbar */
+  .toolbar {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    background: var(--panel); border: 1px solid var(--border); border-top: 0;
+    border-radius: 0 0 18px 18px; padding: 12px 20px;
+  }
+  .toolbar label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .toolbar select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .toolbar select:focus { border-color: var(--accent); outline: none; }
+
   @media (max-width: 640px) {
     .hero { flex-direction: column; align-items: flex-start; }
     .cover, .cover-fallback { width: 100%; height: auto; aspect-ratio: 1/1; }
@@ -373,6 +386,16 @@
     <button data-tab="dev">Developer</button>
   </nav>
 
+  <div class="toolbar">
+    <label>Lyrics provider
+      <select id="lyricsProviderSel"><option value="auto">Auto (all)</option></select>
+    </label>
+    <label>Artwork provider
+      <select id="artworkProviderSel"><option value="auto">Auto (all)</option></select>
+    </label>
+    <span class="muted" id="envelopeStatus"></span>
+  </div>
+
   <section class="tab-pane active" id="tab-lyrics">
     <pre id="lyricsBody">Select a track to load lyrics.</pre>
   </section>
@@ -423,6 +446,53 @@
   var pendingPlay = false;
   var dragFrom = -1;
   var song = null, stream = null, lyrics = null, artwork = null, diag = null;
+  var lyricsSel = "auto", artworkSel = "auto";
+
+  // Provider pickers: "auto" runs the chain (first match wins); a specific
+  // selection hits /v1/lyrics/<provider>/<id> and /v1/artwork/<provider>/<id>.
+  function providerOptions(sel, names) {
+    sel.innerHTML = '<option value="auto">Auto (all)</option>' +
+      names.map(function (n) { return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + "</option>"; }).join("");
+  }
+  async function loadProviders() {
+    try {
+      var p = await api("/v1/providers");
+      providerOptions($("lyricsProviderSel"), p.lyricsProviders.map(function (x) { return x.name; }));
+      providerOptions($("artworkProviderSel"), p.artworkProviders.map(function (x) { return x.name; }));
+    } catch (e) { /* server may be older; pickers stay minimal */ }
+  }
+  function envelopeStatus() {
+    var parts = [];
+    if (lyrics && lyrics.provider) parts.push("lyrics: " + lyrics.provider);
+    if (artwork && artwork.provider) parts.push("artwork: " + artwork.provider);
+    $("envelopeStatus").textContent = parts.join("   ·   ");
+  }
+  function attemptsSummary(attempts) {
+    if (!attempts || !attempts.length) return "";
+    return attempts.map(function (a) {
+      var mark = a.status === "ok" ? "✓" : a.status === "error" ? "✗" : "·";
+      return mark + " " + a.provider + (a.status !== "ok" && a.message ? " (" + a.message + ")" : "");
+    }).join("   ");
+  }
+  function reloadEnvelope(kind) {
+    if (!song) return;
+    var id = encodeURIComponent(song.id);
+    if (kind === "lyrics") {
+      var lp = lyricsSel === "auto" ? "" : encodeURIComponent(lyricsSel) + "/";
+      fetchJson("/v1/lyrics/" + lp + id).then(function (l) {
+        lyrics = l; renderLyrics(); renderDetails(); renderDev(); envelopeStatus();
+      }).catch(function (e) {
+        lyrics = { status: "error", message: e.message }; renderLyrics(); renderDetails(); renderDev(); envelopeStatus();
+      });
+    } else {
+      var ap = artworkSel === "auto" ? "" : encodeURIComponent(artworkSel) + "/";
+      fetchJson("/v1/artwork/" + ap + id).then(function (a) {
+        artwork = a; renderNowPlaying(); renderDetails(); renderDev(); envelopeStatus();
+      }).catch(function (e) {
+        artwork = { status: "error", message: e.message }; renderNowPlaying(); renderDetails(); renderDev(); envelopeStatus();
+      });
+    }
+  }
 
   // ── Small helpers ──
   function el(tag, cls, text) {
@@ -659,12 +729,16 @@
     var body = $("lyricsBody");
     if (!song) { body.textContent = "Select a track to load lyrics."; return; }
     if (!lyrics) { body.textContent = "Loading lyrics…"; return; }
+    var attempts = attemptsSummary(lyrics.attempts);
     if (lyrics.status === "ok" && lyrics.lyrics && lyrics.lyrics.text) {
-      body.textContent = lyrics.lyrics.text;
+      body.textContent = (lyrics.provider ? "[" + lyrics.provider + "]  " : "") +
+        (attempts ? attempts + "\n\n" : "") + lyrics.lyrics.text;
     } else if (lyrics.status === "not_found") {
-      body.textContent = "(no lyrics found for this track)";
+      body.textContent = "(no lyrics found" + (lyrics.provider ? " via " + lyrics.provider : "") + ")" +
+        (attempts ? "\n\n" + attempts : "");
     } else {
-      body.textContent = "(lyrics unavailable: " + (lyrics.message || lyrics.status) + ")";
+      body.textContent = "(lyrics unavailable: " + (lyrics.message || lyrics.status) + ")" +
+        (attempts ? "\n\n" + attempts : "");
     }
   }
 
@@ -693,31 +767,39 @@
     ]) : '<p class="muted">No stream loaded.</p>';
     var a = effectiveArtwork();
     var artHtml;
-    if (artwork && artwork.status !== "ok") {
+    if (artwork && artwork.status === "error") {
       artHtml = '<p class="muted">Status: ' + escapeHtml(artwork.status) +
-        (artwork.message ? " — " + escapeHtml(artwork.message) : "") + "</p>";
+        (artwork.message ? " — " + escapeHtml(artwork.message) : "") + "</p>" +
+        attemptsSummary(artwork.attempts);
     } else if (a) {
       artHtml = kvHtml([
+        { k: "Provider", v: escapeHtml(artwork ? artwork.provider : a.source) },
         { k: "Source", v: escapeHtml(a.source) },
         { k: "Front URL", v: link(a.frontUrl) },
         { k: "Back URL", v: link(a.backUrl) },
+        { k: "Vertical URL", v: link(a.verticalUrl) },
         { k: "Size", v: (a.width && a.height) ? a.width + " × " + a.height + " px" : null },
         { k: "Source MBID", v: escapeHtml(a.sourceMbid) },
         { k: "Thumbnails", v: Object.keys(a.thumbnails || {}).length
             ? Object.entries(a.thumbnails).map(function (e) { return link(e[1], e[0] + "px"); }).join(" · ")
             : null },
       ]);
+      if (a.source === "YouTubeThumbnail") {
+        artHtml += '<p class="muted">No dedicated artwork provider matched — falling back to the track&#39;s own thumbnail.</p>';
+      }
     } else {
       artHtml = '<p class="muted">No artwork loaded.</p>';
     }
     $("dArtwork").innerHTML = artHtml;
     var l = (lyrics && lyrics.status === "ok") ? lyrics.lyrics : null;
     var lyrHtml;
-    if (lyrics && lyrics.status !== "ok") {
+    if (lyrics && lyrics.status === "error") {
       lyrHtml = '<p class="muted">' + escapeHtml(lyrics.status) +
-        (lyrics.message ? " — " + escapeHtml(lyrics.message) : "") + "</p>";
+        (lyrics.message ? " — " + escapeHtml(lyrics.message) : "") + "</p>" +
+        attemptsSummary(lyrics.attempts);
     } else if (l) {
       lyrHtml = kvHtml([
+        { k: "Provider", v: escapeHtml(lyrics ? lyrics.provider : l.source) },
         { k: "Source", v: escapeHtml(l.source) },
         { k: "Synced", v: l.synced ? "Yes" : "No" },
         { k: "Lines", v: String((l.text || "").split("\n").filter(function (x) { return x.trim(); }).length) },
@@ -749,8 +831,8 @@
       }).join("");
       $("devProviders").innerHTML = kvHtml([
         { k: "Music provider", v: escapeHtml(diag.musicProvider.name) },
-        { k: "Lyrics provider", v: escapeHtml(diag.lyricsProvider) },
-        { k: "Artwork provider", v: escapeHtml(diag.artworkProvider) },
+        { k: "Lyrics providers", v: escapeHtml((diag.lyricsProviders || [diag.lyricsProvider]).join(", ")) },
+        { k: "Artwork providers", v: escapeHtml((diag.artworkProviders || [diag.artworkProvider]).join(", ")) },
         { k: "Release resolver", v: escapeHtml(diag.releaseResolver) },
       ]);
       $("devRawDiag").textContent = JSON.stringify(diag, null, 2);
@@ -796,20 +878,24 @@
       $("lyricsBody").textContent = "(stream unavailable: " + e.message + ")";
     }
     // Lyrics (envelope)
-    fetchJson("/v1/lyrics/" + encodeURIComponent(cur.id)).then(function (l) {
+    fetchJson(lyricsSel === "auto"
+        ? "/v1/lyrics/" + encodeURIComponent(cur.id)
+        : "/v1/lyrics/" + encodeURIComponent(lyricsSel) + "/" + encodeURIComponent(cur.id)).then(function (l) {
       if (loadedSongId !== cur.id) return;
-      lyrics = l; renderLyrics(); renderDetails(); renderDev();
+      lyrics = l; renderLyrics(); renderDetails(); renderDev(); envelopeStatus();
     }).catch(function (e) {
       if (loadedSongId !== cur.id) return;
-      lyrics = { status: "error", message: e.message }; renderLyrics(); renderDetails(); renderDev();
+      lyrics = { status: "error", message: e.message }; renderLyrics(); renderDetails(); renderDev(); envelopeStatus();
     });
     // Artwork (envelope)
-    fetchJson("/v1/artwork/" + encodeURIComponent(cur.id)).then(function (a) {
+    fetchJson(artworkSel === "auto"
+        ? "/v1/artwork/" + encodeURIComponent(cur.id)
+        : "/v1/artwork/" + encodeURIComponent(artworkSel) + "/" + encodeURIComponent(cur.id)).then(function (a) {
       if (loadedSongId !== cur.id) return;
-      artwork = a; renderNowPlaying(); renderDetails(); renderDev();
+      artwork = a; renderNowPlaying(); renderDetails(); renderDev(); envelopeStatus();
     }).catch(function (e) {
       if (loadedSongId !== cur.id) return;
-      artwork = { status: "error", message: e.message }; renderNowPlaying(); renderDetails(); renderDev();
+      artwork = { status: "error", message: e.message }; renderNowPlaying(); renderDetails(); renderDev(); envelopeStatus();
     });
   }
 
@@ -878,6 +964,8 @@
     post("/v1/player/autoplay?enabled=" + !engine.autoplayEnabled);
   };
   $("clearBtn").onclick = function () { post("/v1/player/queue/clear"); };
+  $("lyricsProviderSel").onchange = function () { lyricsSel = this.value; reloadEnvelope("lyrics"); };
+  $("artworkProviderSel").onchange = function () { artworkSel = this.value; reloadEnvelope("artwork"); };
 
   $("go").onclick = async function () {
     var q = $("q").value.trim();
@@ -965,6 +1053,7 @@
   renderToggles();
   renderDevPlayback();
   loadDiagnostics();
+  loadProviders();
   setInterval(tick, 600);
   tick();
 })();

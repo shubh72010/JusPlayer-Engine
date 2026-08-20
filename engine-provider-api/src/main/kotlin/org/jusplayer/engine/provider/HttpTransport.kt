@@ -2,6 +2,7 @@ package org.jusplayer.engine.provider
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
  * Minimal blocking HTTP transport used by provider modules (LRCLIB, Cover Art
@@ -19,6 +20,17 @@ interface HttpTransport {
     )
 
     fun get(url: String, headers: Map<String, String> = emptyMap()): Response
+
+    /**
+     * Sends a form-urlencoded POST request. Only providers that need to write to
+     * an API (e.g. Last.fm scrobbling) use this; the default implementation
+     * throws so GET-only transports and test fakes are unaffected.
+     */
+    fun post(
+        url: String,
+        form: Map<String, String>,
+        headers: Map<String, String> = emptyMap(),
+    ): Response = throw UnsupportedOperationException("POST not supported by this transport")
 }
 
 /**
@@ -56,6 +68,39 @@ class JdkHttpTransport(
         val stream = if (isSuccess) connection.inputStream else connection.errorStream
             ?: return ""
         return stream.bufferedReader().use { it.readText() }
+    }
+
+    override fun post(
+        url: String,
+        form: Map<String, String>,
+        headers: Map<String, String>,
+    ): HttpTransport.Response {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = connectTimeoutMillis
+            connection.readTimeout = readTimeoutMillis
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", userAgent)
+            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
+
+            val encoded = form.entries.joinToString("&") { (name, value) ->
+                "${URLEncoder.encode(name, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+            }
+            connection.outputStream.use { it.write(encoded.toByteArray(Charsets.UTF_8)) }
+
+            val status = connection.responseCode
+            val body = readBody(connection, status in 200..299)
+            return HttpTransport.Response(
+                status = status,
+                body = body,
+                headers = connection.headerFields ?: emptyMap(),
+            )
+        } finally {
+            connection.disconnect()
+        }
     }
 
     companion object {

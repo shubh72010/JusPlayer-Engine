@@ -8,6 +8,7 @@ own interface — a backend does not need to provide all of them.
 | Music | `MusicProvider` | search, `getSong`, `getStream` |
 | Lyrics | `LyricsProvider` | synced + plain lyrics for a `Song` |
 | Artwork | `ArtworkProvider` | cover art for a MusicBrainz release |
+| Direct artwork | `SongArtworkProvider` | artwork resolved from the `Song` itself (no MBID) |
 | Release resolution | `ReleaseResolver` | `Song` → MusicBrainz release MBID |
 
 The DSL registers them like this:
@@ -24,8 +25,10 @@ createJusPlayer {
 
 Only `provider(...)` and `player(...)` matter for the engine to run; the rest are
 optional. `engine.lyrics(song)` returns `null` when no `LyricsProvider` is
-registered; `engine.artwork(song)` returns `null` unless **both** a
-`ReleaseResolver` and an `ArtworkProvider` are registered.
+registered. `engine.artwork(song)` returns `null` unless an `ArtworkProvider` is
+registered — a `SongArtworkProvider` (e.g. Apple Music canvas) resolves from the
+song directly, while a plain `ArtworkProvider` (e.g. Cover Art Archive) needs a
+`ReleaseResolver` to map the song to an MBID first.
 
 ---
 
@@ -100,6 +103,81 @@ Song ──MusicBrainzResolver──▶ release MBID ──CoverArtArchiveProvid
 
 **Note:** MusicBrainz requires a client `User-Agent` and asks for ~1 req/s;
 be polite in production.
+
+---
+
+## Lyrics providers — `engine-provider-*`
+
+Six additional `LyricsProvider`s are bundled. All match by `Song` metadata, return
+`Lyrics` (with `lines`/`words` when the source carries timings), and map HTTP
+failures to `ProviderException` (`404` → `NotFound`, `429` → `RateLimited`).
+
+```kotlin
+val lyricsProvider = KuGouProvider()
+// or SimpMusicProvider(), PaxsenixProvider(), BetterLyricsProvider(),
+//     UnisonProvider(), YouLyPlusProvider()
+```
+
+- **KuGou** (`engine-provider-kugou`) — KuGou's lyric API, matched by title +
+  artist + duration.
+- **SimpMusic** (`engine-provider-simpmusic`) — keys off the streaming **video
+  id** (`song.id`), ideal for YouTube-sourced songs; single endpoint, no
+  metadata matching.
+- **Paxsenix** (`engine-provider-paxsenix`) — a fallback chain across Apple →
+  NetEase → Spotify → Musixmatch; picks the best-synced match and prefers klyric
+  over LRC. Returns `null` when every upstream fails.
+- **BetterLyrics** (`engine-provider-betterlyrics`) — Apple Music's TTML lyrics
+  API with a full TTML parser (frame-rate aware, translation/transliteration,
+  word-level timings via `toEngineLines()`).
+- **Unison** (`engine-provider-unison`) — video-id fast path → metadata lookup →
+  search materialization (max 5 candidates).
+- **YouLyPlus** (`engine-provider-youlyplus`) — YouLyPlus mirrors with failover
+  (Binimum → Prjktla), parsing TTML → LRC → plain text; karaoke syllabi become
+  word-level timings.
+
+**Limits:** availability of each upstream varies by region; KuGou/Paxsenix hit
+East-Asian services, BetterLyrics/YouLyPlus are Apple-music-oriented. Prefer
+several providers and try them in order if you need broad coverage.
+
+---
+
+## Apple Music Canvas — `engine-provider-canvas`
+
+An animated-artwork provider.
+
+```kotlin
+val artworkProvider = CanvasArtworkProvider()
+```
+
+- Implements **`SongArtworkProvider`**, so it needs **no `ReleaseResolver`** —
+  `engine.artwork(song)` resolves straight from the song's title + artist.
+- Tries `CanvasService` (Archivetune mirrors) with an Apple Music Canvas fallback
+  (Apple Music API, public JWT).
+- Returns `Artwork` with `frontUrl` pointing at the animated `m3u8` (HLS) and the
+  new `verticalUrl` for portrait clips; static art is available in `thumbnails`.
+- Responses are cached in memory (~60s TTL). Non-2xx mirrors are skipped, `429`
+  maps to `RateLimited`, nothing matched → `null`.
+
+---
+
+## Last.fm — `engine-provider-lastfm`
+
+Scrobbling is not a provider role — this module exposes `LastFMClient` and
+`ScrobbleManager` directly.
+
+```kotlin
+val client = LastFMClient(apiKey, apiSecret)          // optional 4th arg: endpoint
+val manager = ScrobbleManager(scope, client)          // or a custom ScrobbleListener
+manager.onSongStart(track)                            // now-playing + start the timer
+manager.onPlayerStateChanged(isPlaying, track)        // pause/resume-aware
+```
+
+- `LastFMClient` — token/session auth, MD5 `api_sig` signing, `updateNowPlaying`
+  and `scrobble` (`artist[0]`/`track[0]`/`timestamp[0]`), works with **Libre.fm**
+  via a custom endpoint. Throws `LastFmException` on API errors.
+- `ScrobbleManager` — scrobbles after **50%** of the track (capped at 180s),
+  never before 30s, with the `songStartedAt` timestamp. Pausing pauses the timer;
+  seek-forward refreshes it.
 
 ---
 

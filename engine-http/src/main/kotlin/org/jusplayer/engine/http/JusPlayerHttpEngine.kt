@@ -32,12 +32,22 @@ import org.jusplayer.engine.model.RepeatMode
 import org.jusplayer.engine.model.Song as JpSong
 import org.jusplayer.engine.model.Stream as JpStream
 import org.jusplayer.engine.playback.PlayerAdapter
+import org.jusplayer.engine.provider.ArtworkProvider
+import org.jusplayer.engine.provider.LyricsProvider
 import org.jusplayer.engine.provider.MusicProvider
 import org.jusplayer.engine.provider.RelatedProvider
+import org.jusplayer.engine.provider.SongArtworkProvider
+import org.jusplayer.engine.provider.betterlyrics.BetterLyricsProvider
+import org.jusplayer.engine.provider.canvas.CanvasArtworkProvider
 import org.jusplayer.engine.provider.coverartarchive.CoverArtArchiveProvider
 import org.jusplayer.engine.provider.coverartarchive.MusicBrainzResolver
+import org.jusplayer.engine.provider.kugou.KuGouProvider
 import org.jusplayer.engine.provider.lrclib.LRCLIBProvider
 import org.jusplayer.engine.provider.newpipe.NewPipeProvider
+import org.jusplayer.engine.provider.paxsenix.PaxsenixProvider
+import org.jusplayer.engine.provider.simpmusic.SimpMusicProvider
+import org.jusplayer.engine.provider.unison.UnisonProvider
+import org.jusplayer.engine.provider.youlyplus.YouLyPlusProvider
 
 fun main(args: Array<String>) {
     val port = args.firstOrNull()?.toIntOrNull()
@@ -48,14 +58,28 @@ fun main(args: Array<String>) {
 
 class JusPlayerHttpEngine(private val port: Int = 8368) {
     private val provider: MusicProvider = NewPipeProvider()
-    private val lyricsProvider = LRCLIBProvider()
-    private val artworkProvider = CoverArtArchiveProvider()
+    // Every bundled provider, in the order the chain endpoints try them.
+    private val lyricsProviders: List<LyricsProvider> = listOf(
+        LRCLIBProvider(),
+        KuGouProvider(),
+        SimpMusicProvider(),
+        PaxsenixProvider(),
+        BetterLyricsProvider(),
+        UnisonProvider(),
+        YouLyPlusProvider(),
+    )
+    private val artworkProviders: List<ArtworkProvider> = listOf(
+        CanvasArtworkProvider(),
+        CoverArtArchiveProvider(),
+    )
     private val releaseResolver = MusicBrainzResolver()
 
+    // The engine DSL takes a single provider per role; the chain endpoints below
+    // iterate the full lists directly so every provider can be exercised.
     private val player = createJusPlayer {
         provider(this@JusPlayerHttpEngine.provider)
-        lyricsProvider(this@JusPlayerHttpEngine.lyricsProvider)
-        artworkProvider(this@JusPlayerHttpEngine.artworkProvider)
+        lyricsProvider(this@JusPlayerHttpEngine.lyricsProviders.first())
+        artworkProvider(this@JusPlayerHttpEngine.artworkProviders.first())
         releaseResolver(this@JusPlayerHttpEngine.releaseResolver)
         player(NoopPlayerAdapter())
         // Bake autoplay into the engine: prefer the platform's own
@@ -106,8 +130,27 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                                     recommendations = provider.capabilities.recommendations,
                                 ),
                             ),
-                            lyricsProvider = lyricsProvider.name,
-                            artworkProvider = artworkProvider.name,
+                            lyricsProvider = lyricsProviders.first().name,
+                            artworkProvider = artworkProviders.first().name,
+                            lyricsProviders = lyricsProviders.map { it.name },
+                            artworkProviders = artworkProviders.map { it.name },
+                            releaseResolver = releaseResolver.name,
+                        ),
+                    )
+                }
+
+                // Everything the server can test, with how each artwork source
+                // resolves (direct from the Song vs MusicBrainz MBID).
+                get("/v1/providers") {
+                    call.respond(
+                        ProvidersResponse(
+                            lyricsProviders = lyricsProviders.map { ProviderDescriptor(name = it.name) },
+                            artworkProviders = artworkProviders.map {
+                                ProviderDescriptor(
+                                    name = it.name,
+                                    kind = if (it is SongArtworkProvider) "song" else "mbid",
+                                )
+                            },
                             releaseResolver = releaseResolver.name,
                         ),
                     )
@@ -137,43 +180,110 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
                     }
                 }
 
+                // Lyrics: chain across every registered lyrics provider and
+                // return the first match, reporting each provider's outcome.
                 get("/v1/lyrics/{id}") {
                     val id = call.parameters["id"] ?: ""
                     try {
                         val song = provider.getSong(id)
-                        val lyrics = player.engine.lyrics(song)
-                        if (lyrics != null) {
-                            call.respond(LyricsResponse(status = "ok", provider = lyricsProvider.name, lyrics = lyrics))
-                        } else {
-                            call.respond(
-                                LyricsResponse(
-                                    status = "not_found",
-                                    provider = lyricsProvider.name,
-                                    message = "no lyrics found for this track",
-                                ),
-                            )
-                        }
+                        val attempts = lyricsProviders.map { lyricsAttempt(it, song) }
+                        respondLyricsChain(call, attempts)
+                    } catch (e: Exception) {
+                        call.respond(LyricsResponse(status = "error", message = e.message))
+                    }
+                }
+
+                // Lyrics: exercise one specific provider by name.
+                get("/v1/lyrics/{lyricsProvider}/{id}") {
+                    val id = call.parameters["id"] ?: ""
+                    val name = call.parameters["lyricsProvider"] ?: ""
+                    val lyricsProvider = lyricsProviders.firstOrNull {
+                        it.name.equals(name, ignoreCase = true) || it.name.lowercase() == name.lowercase()
+                    }
+                    if (lyricsProvider == null) {
+                        call.respond(LyricsResponse(status = "error", message = "unknown lyrics provider '$name'"))
+                        return@get
+                    }
+                    try {
+                        val song = provider.getSong(id)
+                        val attempt = lyricsAttempt(lyricsProvider, song)
+                        call.respond(
+                            LyricsResponse(
+                                status = attempt.status,
+                                provider = lyricsProvider.name,
+                                message = attempt.message,
+                                lyrics = attempt.lyrics,
+                                attempts = listOf(attempt),
+                            ),
+                        )
                     } catch (e: Exception) {
                         call.respond(LyricsResponse(status = "error", provider = lyricsProvider.name, message = e.message))
                     }
                 }
 
+                // Artwork: chain across every registered artwork provider. When
+                // none match, fall back to the song's own thumbnail (already
+                // shown in the player) instead of a bare not_found.
                 get("/v1/artwork/{id}") {
                     val id = call.parameters["id"] ?: ""
                     try {
                         val song = provider.getSong(id)
-                        val artwork = player.engine.artwork(song)
+                        val attempts = artworkProviders.map { artworkAttempt(it, song) }
+                        val hit = attempts.firstOrNull { it.status == "ok" }
+                        val artwork = hit?.artwork ?: song.thumbnailUrl?.let {
+                            Artwork(
+                                frontUrl = it,
+                                source = "YouTubeThumbnail",
+                                thumbnails = mapOf("thumbnail" to it),
+                            )
+                        }
                         if (artwork != null) {
-                            call.respond(ArtworkResponse(status = "ok", provider = artworkProvider.name, artwork = artwork))
+                            call.respond(
+                                ArtworkResponse(
+                                    status = "ok",
+                                    provider = hit?.provider ?: "YouTubeThumbnail",
+                                    message = hit?.message,
+                                    artwork = artwork,
+                                    attempts = attempts,
+                                ),
+                            )
                         } else {
                             call.respond(
                                 ArtworkResponse(
                                     status = "not_found",
-                                    provider = artworkProvider.name,
                                     message = "no artwork found for this track",
+                                    attempts = attempts,
                                 ),
                             )
                         }
+                    } catch (e: Exception) {
+                        call.respond(ArtworkResponse(status = "error", message = e.message))
+                    }
+                }
+
+                // Artwork: exercise one specific artwork provider by name.
+                get("/v1/artwork/{artworkProvider}/{id}") {
+                    val id = call.parameters["id"] ?: ""
+                    val name = call.parameters["artworkProvider"] ?: ""
+                    val artworkProvider = artworkProviders.firstOrNull {
+                        it.name.equals(name, ignoreCase = true) || it.name.lowercase() == name.lowercase()
+                    }
+                    if (artworkProvider == null) {
+                        call.respond(ArtworkResponse(status = "error", message = "unknown artwork provider '$name'"))
+                        return@get
+                    }
+                    try {
+                        val song = provider.getSong(id)
+                        val attempt = artworkAttempt(artworkProvider, song)
+                        call.respond(
+                            ArtworkResponse(
+                                status = attempt.status,
+                                provider = artworkProvider.name,
+                                message = attempt.message,
+                                artwork = attempt.artwork,
+                                attempts = listOf(attempt),
+                            ),
+                        )
                     } catch (e: Exception) {
                         call.respond(ArtworkResponse(status = "error", provider = artworkProvider.name, message = e.message))
                     }
@@ -372,6 +482,61 @@ class JusPlayerHttpEngine(private val port: Int = 8368) {
         // graceful shutdown would go here
     }
 
+    private suspend fun lyricsAttempt(lyricsProvider: LyricsProvider, song: JpSong): ProviderAttempt =
+        try {
+            val lyrics = lyricsProvider.getLyrics(song)
+            if (lyrics != null) {
+                ProviderAttempt(provider = lyricsProvider.name, status = "ok", lyrics = lyrics)
+            } else {
+                ProviderAttempt(provider = lyricsProvider.name, status = "not_found", message = "no lyrics found")
+            }
+        } catch (e: Exception) {
+            ProviderAttempt(provider = lyricsProvider.name, status = "error", message = e.message)
+        }
+
+    private suspend fun artworkAttempt(artworkProvider: ArtworkProvider, song: JpSong): ProviderAttempt =
+        try {
+            val direct = artworkProvider as? SongArtworkProvider
+            val artwork =
+                if (direct != null) {
+                    direct.getArtwork(song)
+                } else {
+                    val mbid = releaseResolver.resolveReleaseMbid(song)
+                    if (mbid == null) null else artworkProvider.getArtwork(mbid)
+                }
+            if (artwork != null) {
+                ProviderAttempt(provider = artworkProvider.name, status = "ok", artwork = artwork)
+            } else {
+                ProviderAttempt(provider = artworkProvider.name, status = "not_found", message = "no artwork found")
+            }
+        } catch (e: Exception) {
+            ProviderAttempt(provider = artworkProvider.name, status = "error", message = e.message)
+        }
+
+    private suspend fun respondLyricsChain(call: ApplicationCall, attempts: List<ProviderAttempt>) {
+        val hit = attempts.firstOrNull { it.status == "ok" }
+        if (hit != null) {
+            call.respond(
+                LyricsResponse(
+                    status = "ok",
+                    provider = hit.provider,
+                    message = hit.message,
+                    lyrics = hit.lyrics,
+                    attempts = attempts,
+                ),
+            )
+        } else {
+            val allFailed = attempts.all { it.status == "error" }
+            call.respond(
+                LyricsResponse(
+                    status = if (allFailed) "error" else "not_found",
+                    message = if (allFailed) "all lyrics providers failed" else "no lyrics found by any provider",
+                    attempts = attempts,
+                ),
+            )
+        }
+    }
+
     private fun playerState(): PlayerStateResponse {
         val snapshot = player.queue.state.value
         return PlayerStateResponse(
@@ -519,6 +684,7 @@ data class LyricsResponse(
     val provider: String? = null,
     val message: String? = null,
     val lyrics: Lyrics? = null,
+    val attempts: List<ProviderAttempt> = emptyList(),
 )
 
 @Serializable
@@ -526,6 +692,16 @@ data class ArtworkResponse(
     val status: String,
     val provider: String? = null,
     val message: String? = null,
+    val artwork: Artwork? = null,
+    val attempts: List<ProviderAttempt> = emptyList(),
+)
+
+@Serializable
+data class ProviderAttempt(
+    val provider: String,
+    val status: String,
+    val message: String? = null,
+    val lyrics: Lyrics? = null,
     val artwork: Artwork? = null,
 )
 
@@ -544,7 +720,23 @@ data class DiagnosticsResponse(
     val musicProvider: ProviderInfo,
     val lyricsProvider: String,
     val artworkProvider: String,
+    val lyricsProviders: List<String> = emptyList(),
+    val artworkProviders: List<String> = emptyList(),
     val releaseResolver: String,
+)
+
+@Serializable
+data class ProvidersResponse(
+    val lyricsProviders: List<ProviderDescriptor>,
+    val artworkProviders: List<ProviderDescriptor>,
+    val releaseResolver: String,
+)
+
+@Serializable
+data class ProviderDescriptor(
+    val name: String,
+    /** For artwork providers: "song" resolves from the Song directly, "mbid" via MusicBrainz. */
+    val kind: String? = null,
 )
 
 @Serializable
